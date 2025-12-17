@@ -1,0 +1,68 @@
+name: Update Claude Code
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # Run hourly
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Check for updates
+        id: check
+        run: |
+          set -euo pipefail
+
+          # Derive GCS bucket URL from official install.sh redirect
+          REDIRECT_HEADERS=$(curl -fsSI https://claude.ai/install.sh) || {
+            echo "Error: Failed to fetch https://claude.ai/install.sh"
+            exit 1
+          }
+          BOOTSTRAP_URL=$(echo "$REDIRECT_HEADERS" | grep -i '^location:' | awk '{print $2}' | tr -d '\r')
+          if [ -z "$BOOTSTRAP_URL" ]; then
+            echo "Error: No redirect found from https://claude.ai/install.sh"
+            exit 1
+          fi
+          GCS_BUCKET="${BOOTSTRAP_URL%/bootstrap.sh}"
+
+          STABLE_REMOTE=$(curl -fsSL "$GCS_BUCKET/stable")
+          LATEST_REMOTE=$(curl -fsSL "$GCS_BUCKET/latest")
+          STABLE_LOCAL=$(grep -A2 '^  stable = {' sources.nix | grep 'version' | sed 's/.*"\([^"]*\)".*/\1/')
+          LATEST_LOCAL=$(grep -A2 '^  latest = {' sources.nix | grep 'version' | sed 's/.*"\([^"]*\)".*/\1/')
+
+          echo "stable_remote=$STABLE_REMOTE" >> $GITHUB_OUTPUT
+          echo "latest_remote=$LATEST_REMOTE" >> $GITHUB_OUTPUT
+          echo "stable_local=$STABLE_LOCAL" >> $GITHUB_OUTPUT
+          echo "latest_local=$LATEST_LOCAL" >> $GITHUB_OUTPUT
+
+          if [ "$STABLE_REMOTE" != "$STABLE_LOCAL" ] || [ "$LATEST_REMOTE" != "$LATEST_LOCAL" ]; then
+            echo "needs_update=true" >> $GITHUB_OUTPUT
+          else
+            echo "needs_update=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run update script
+        if: steps.check.outputs.needs_update == 'true'
+        run: ./scripts/update-version.sh
+
+      - name: Create Pull Request
+        if: steps.check.outputs.needs_update == 'true'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "update stable to ${{ steps.check.outputs.stable_remote }}, latest to ${{ steps.check.outputs.latest_remote }}"
+          title: "update stable to ${{ steps.check.outputs.stable_remote }}, latest to ${{ steps.check.outputs.latest_remote }}"
+          body: |
+            Automated update.
+
+            - stable: ${{ steps.check.outputs.stable_local }} → ${{ steps.check.outputs.stable_remote }}
+            - latest: ${{ steps.check.outputs.latest_local }} → ${{ steps.check.outputs.latest_remote }}
+          branch: update-claude
+          delete-branch: true
