@@ -31,6 +31,29 @@ let
   hasSettings = cfg.settings != { };
   hasMcpServers = cfg.mcpServers != { };
 
+  # Shell function to print keys that will be overridden during merge
+  # Usage: print_overrides "label" "new.json" "existing.json" ["jq_path"]
+  printOverridesScript = ''
+    print_overrides() {
+      local label="$1"
+      local new_file="$2"
+      local existing_file="$3"
+      local jq_path="''${4:-.}"
+
+      ${pkgs.jq}/bin/jq -r --arg label "$label" --arg jq_path "$jq_path" '
+        # Get objects at the specified path from both files
+        (if $jq_path == "." then .[0] else .[0] | getpath($jq_path | split(".") | .[1:]) end) as $new |
+        (if $jq_path == "." then .[1] else .[1] | getpath($jq_path | split(".") | .[1:]) end) as $existing |
+        # For each key in new, check if it exists in existing with different value
+        ($new | keys[]) as $key |
+        select($existing != null) |
+        select($existing | has($key)) |
+        select($new[$key] != $existing[$key]) |
+        "\u001b[33m[\($label)] Overriding \($key):\u001b[0m\n  Old: \($existing[$key] | @json)\n  New: \($new[$key] | @json)"
+      ' -s "$new_file" "$existing_file" 2>/dev/null || true
+    }
+  '';
+
   # Build MCP server config, only including non-empty optional fields
   mkMcpServer =
     name: server:
@@ -168,6 +191,12 @@ in
       '';
     };
 
+    printOverrides = mkOption {
+      type = types.bool;
+      default = false;
+      description = "Print old values when config keys are overridden during activation";
+    };
+
     configDir = mkOption {
       type = types.str;
       default = "${config.home.homeDirectory}/.claude";
@@ -210,12 +239,15 @@ in
 
       # Merge nix settings into existing file
       home.activation.claudeCodeSettingsSync = lib.hm.dag.entryAfter [ "claudeCodeDefaults" ] ''
+                ${optionalString cfg.printOverrides printOverridesScript}
                 SETTINGS_PATH="${cfg.configDir}/settings.json"
                 if [ -f "$SETTINGS_PATH" ]; then
                   TEMP_FILE=$(${pkgs.coreutils}/bin/mktemp)
                   cat > "$TEMP_FILE.defaults" <<'DEFAULTS_EOF'
         ${builtins.toJSON cfg.settings}
         DEFAULTS_EOF
+                  ${optionalString cfg.printOverrides ''# Print any keys that will be overridden
+                  print_overrides "settings.json" "$TEMP_FILE.defaults" "$SETTINGS_PATH"''}
                   $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s ${jqMergeExpr} "$TEMP_FILE.defaults" "$SETTINGS_PATH" > "$TEMP_FILE"
                   $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$TEMP_FILE" "$SETTINGS_PATH"
                   $DRY_RUN_CMD ${pkgs.coreutils}/bin/rm -f "$TEMP_FILE.defaults"
@@ -243,6 +275,7 @@ in
     # MCP servers config (only when mcpServers defined)
     (mkIf hasMcpServers {
       home.activation.claudeCodeMcpServers = lib.hm.dag.entryAfter [ "claudeCodeInstallMethod" ] ''
+                ${optionalString cfg.printOverrides printOverridesScript}
                 MCP_PATH="${config.home.homeDirectory}/.claude.json"
                 TEMP_FILE=$(${pkgs.coreutils}/bin/mktemp)
                 cat > "$TEMP_FILE.nix" <<'NIX_EOF'
@@ -254,6 +287,8 @@ in
                 if [ ! -f "$MCP_PATH" ]; then
                   echo '{}' > "$MCP_PATH"
                 fi
+                ${optionalString cfg.printOverrides ''# Print any MCP servers that will be overridden
+                print_overrides "mcpServers" "$TEMP_FILE.nix" "$MCP_PATH" ".mcpServers"''}
                 # Deep merge: nix config wins for mcpServers
                 $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s ${jqMergeExpr} "$TEMP_FILE.nix" "$MCP_PATH" > "$TEMP_FILE"
                 $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$TEMP_FILE" "$MCP_PATH"
