@@ -15,8 +15,8 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
 
-      - name: Check for updates
-        id: check
+      - name: Check for native updates
+        id: check-native
         run: |
           set -euo pipefail
 
@@ -48,21 +48,73 @@ jobs:
             echo "needs_update=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Run update script
-        if: steps.check.outputs.needs_update == 'true'
-        run: ./scripts/update-version.sh
+      - name: Check for npm updates
+        id: check-npm
+        run: |
+          set -euo pipefail
+
+          NPM_REMOTE=$(curl -fsSL "https://registry.npmjs.org/@anthropic-ai/claude-code/latest" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')
+          NPM_LOCAL=$(grep -A2 '^  npm = {' sources.nix | grep 'version' | sed 's/.*"\([^"]*\)".*/\1/')
+
+          echo "npm_remote=$NPM_REMOTE" >> $GITHUB_OUTPUT
+          echo "npm_local=$NPM_LOCAL" >> $GITHUB_OUTPUT
+
+          if [ "$NPM_REMOTE" != "$NPM_LOCAL" ]; then
+            echo "needs_update=true" >> $GITHUB_OUTPUT
+          else
+            echo "needs_update=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run native update script
+        if: steps.check-native.outputs.needs_update == 'true'
+        run: ./scripts/update-native.sh
+
+      - name: Run npm update script
+        if: steps.check-npm.outputs.needs_update == 'true'
+        run: ./scripts/update-npm.sh
+
+      - name: Build PR title and body
+        if: steps.check-native.outputs.needs_update == 'true' || steps.check-npm.outputs.needs_update == 'true'
+        id: pr-info
+        run: |
+          TITLE_PARTS=""
+          BODY_LINES=""
+
+          if [ "${{ steps.check-native.outputs.needs_update }}" = "true" ]; then
+            TITLE_PARTS="native: stable ${{ steps.check-native.outputs.stable_remote }}, latest ${{ steps.check-native.outputs.latest_remote }}"
+            BODY_LINES="- native stable: ${{ steps.check-native.outputs.stable_local }} → ${{ steps.check-native.outputs.stable_remote }}"
+            BODY_LINES="$BODY_LINES
+          - native latest: ${{ steps.check-native.outputs.latest_local }} → ${{ steps.check-native.outputs.latest_remote }}"
+          fi
+
+          if [ "${{ steps.check-npm.outputs.needs_update }}" = "true" ]; then
+            if [ -n "$TITLE_PARTS" ]; then
+              TITLE_PARTS="$TITLE_PARTS; npm: ${{ steps.check-npm.outputs.npm_remote }}"
+            else
+              TITLE_PARTS="npm: ${{ steps.check-npm.outputs.npm_remote }}"
+            fi
+            if [ -n "$BODY_LINES" ]; then
+              BODY_LINES="$BODY_LINES
+          - npm: ${{ steps.check-npm.outputs.npm_local }} → ${{ steps.check-npm.outputs.npm_remote }}"
+            else
+              BODY_LINES="- npm: ${{ steps.check-npm.outputs.npm_local }} → ${{ steps.check-npm.outputs.npm_remote }}"
+            fi
+          fi
+
+          echo "title=update $TITLE_PARTS" >> $GITHUB_OUTPUT
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "Automated update." >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "$BODY_LINES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create Pull Request
-        if: steps.check.outputs.needs_update == 'true'
+        if: steps.check-native.outputs.needs_update == 'true' || steps.check-npm.outputs.needs_update == 'true'
         uses: peter-evans/create-pull-request@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "update stable to ${{ steps.check.outputs.stable_remote }}, latest to ${{ steps.check.outputs.latest_remote }}"
-          title: "update stable to ${{ steps.check.outputs.stable_remote }}, latest to ${{ steps.check.outputs.latest_remote }}"
-          body: |
-            Automated update.
-
-            - stable: ${{ steps.check.outputs.stable_local }} → ${{ steps.check.outputs.stable_remote }}
-            - latest: ${{ steps.check.outputs.latest_local }} → ${{ steps.check.outputs.latest_remote }}
+          commit-message: ${{ steps.pr-info.outputs.title }}
+          title: ${{ steps.pr-info.outputs.title }}
+          body: ${{ steps.pr-info.outputs.body }}
           branch: update-claude
           delete-branch: true

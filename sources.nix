@@ -1,10 +1,16 @@
-# Version sources for Claude Code native binary
+# Version sources for Claude Code
 #
-# To update, run: ./scripts/update-version.sh
+# To update:
+#   - Native binary: ./scripts/update-native.sh
+#   - npm package: ./scripts/update-npm.sh
+#   - Both: ./scripts/update-all.sh
 #
-# Channels:
+# Native channels:
 #   - stable: Production-ready releases
 #   - latest: Most recent release (may be ahead of stable)
+#
+# npm:
+#   - Single version from npm registry
 
 {
   stable = {
@@ -23,17 +29,23 @@
   };
 
   latest = {
-    version = "2.0.71";
+    version = "2.0.72";
     platforms = {
       "aarch64-darwin" = {
-        sha256 = "e1d03be9667c45ed3389a7ad23e5cd998da01b06067d68d2db17b0660f75fd62";
+        sha256 = "57c9ebe132a5ed8aa934d1f728c6fe9b08dc4f9f6c44697d98d965158e9d8c48";
       };
       "x86_64-linux" = {
-        sha256 = "38eab2ff90b2961afbca8957f779ec8a642dfe9a24ff169db780b8ab6685bf3b";
+        sha256 = "91521249ef601cc2e6a0f4432ce095acc99ecbb87cf29c2b5bf652e566503bb7";
       };
       "aarch64-linux" = {
-        sha256 = "7df8e01b62480c48bbbe10ff892e97589d2564ef11c49a93f51cb77a96fa4900";
+        sha256 = "44fc21f4670c77ae30b0705f79c9a572bf8516a4f8ca918f62320444ed360c4b";
       };
     };
+  };
+
+  # npm package version
+  npm = {
+    version = "2.0.72";
+    sha256 = "1bb8f7cjzc7xv22djb5bna5dig6fiykslvx498rxvwvwxz0ygq1i";
   };
 }

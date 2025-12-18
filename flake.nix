@@ -1,5 +1,5 @@
 {
-  description = "Nix package for Claude Code (official native binary) - AI coding assistant in your terminal";
+  description = "Nix package for Claude Code - AI coding assistant in your terminal";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -11,8 +11,11 @@
       supportedSystems = [ "aarch64-darwin" "x86_64-linux" "aarch64-linux" ];
 
       overlay = final: prev: {
-        claude-code = final.callPackage ./package.nix { channel = "latest"; };
-        claude-code-stable = final.callPackage ./package.nix { channel = "stable"; };
+        # Native binary variants
+        claude-code = final.callPackage ./native.nix { channel = "latest"; };
+        claude-code-stable = final.callPackage ./native.nix { channel = "stable"; };
+        # npm variant
+        claude-code-npm = final.callPackage ./npm.nix { };
       };
     in
     flake-utils.lib.eachSystem supportedSystems (system:
@@ -25,8 +28,12 @@
       in
       {
         packages = {
-          default = pkgs.claude-code;
-          stable = pkgs.claude-code-stable;
+          # Native binary packages
+          native-latest = pkgs.claude-code;
+          native-stable = pkgs.claude-code-stable;
+          # npm package
+          npm = pkgs.claude-code-npm;
+          # No default - forces explicit choice between native/npm
         };
       }) // {
         overlays.default = overlay;

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# Update Claude Code versions in sources.nix
+# Update Claude Code native binary versions in sources.nix
 #
-# Usage: ./scripts/update-version.sh [channel]
+# Usage: ./scripts/update-native.sh [channel]
 #
 # Arguments:
 #   channel - "stable", "latest", or "all" (default: all)
@@ -152,7 +152,7 @@ esac
 echo ""
 echo "Testing builds..."
 cd "$SCRIPT_DIR/.."
-if nix build .#stable --no-link 2>/dev/null && nix build .#latest --no-link 2>/dev/null; then
+if nix build .#native-stable --no-link 2>/dev/null && nix build .#native-latest --no-link 2>/dev/null; then
     echo "All builds successful!"
 else
     echo "Build failed! You may need to roll back:"
@@ -164,11 +164,11 @@ echo ""
 
 # Build commit message with versions
 if [ -n "$STABLE_VERSION" ] && [ -n "$LATEST_VERSION" ]; then
-    COMMIT_MSG="update stable to $STABLE_VERSION, latest to $LATEST_VERSION"
+    COMMIT_MSG="native: update stable to $STABLE_VERSION, latest to $LATEST_VERSION"
 elif [ -n "$STABLE_VERSION" ]; then
-    COMMIT_MSG="update stable to $STABLE_VERSION"
+    COMMIT_MSG="native: update stable to $STABLE_VERSION"
 elif [ -n "$LATEST_VERSION" ]; then
-    COMMIT_MSG="update latest to $LATEST_VERSION"
+    COMMIT_MSG="native: update latest to $LATEST_VERSION"
 else
     echo "Already up to date!"
     exit 0

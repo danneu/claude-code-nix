@@ -9,6 +9,9 @@ on:
 jobs:
   build:
     runs-on: macos-latest
+    strategy:
+      matrix:
+        package: [native-latest, native-stable, npm]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -16,8 +19,8 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
 
-      - name: Build
-        run: nix build
+      - name: Build ${{ matrix.package }}
+        run: nix build .#${{ matrix.package }}
 
       - name: Test version
         run: ./result/bin/claude --version
