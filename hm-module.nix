@@ -5,6 +5,7 @@
 # - Channel selection for native variant (stable/latest)
 # - Declarative settings management (~/.claude/settings.json)
 # - MCP server configuration (~/.claude.json)
+# - Custom slash commands (~/.claude/commands/)
 {
   config,
   lib,
@@ -30,6 +31,19 @@ let
       "'.[0] * .[1]'"; # config first, then file overwrites
   hasSettings = cfg.settings != { };
   hasMcpServers = cfg.mcpServers != { };
+
+  # Recursively read a directory, returning { "relative/path.md" = "/abs/path.md"; ... }
+  readDirRec =
+    dir: prefix:
+    lib.concatMapAttrs (
+      name: type:
+      if type == "directory" then
+        readDirRec "${dir}/${name}" "${prefix}${name}/"
+      else if type == "regular" && lib.hasSuffix ".md" name then
+        { "${prefix}${name}" = "${dir}/${name}"; }
+      else
+        { }
+    ) (builtins.readDir dir);
 
   # Shell function to print keys that will be overridden during merge
   # Usage: print_overrides "label" "new.json" "existing.json" ["jq_path"]
@@ -202,6 +216,13 @@ in
       default = "${config.home.homeDirectory}/.claude";
       description = "Path to Claude's config directory";
     };
+
+    commandsDir = mkOption {
+      type = types.nullOr types.path;
+      default = null;
+      description = "Directory containing custom slash command .md files (supports nested directories) https://code.claude.com/docs/en/slash-commands#custom-slash-commands";
+      example = literalExpression "./claude-commands";
+    };
   };
 
   config = mkIf cfg.enable (mkMerge [
@@ -246,8 +267,9 @@ in
                   cat > "$TEMP_FILE.defaults" <<'DEFAULTS_EOF'
         ${builtins.toJSON cfg.settings}
         DEFAULTS_EOF
-                  ${optionalString cfg.printOverrides ''# Print any keys that will be overridden
-                  print_overrides "settings.json" "$TEMP_FILE.defaults" "$SETTINGS_PATH"''}
+                  ${optionalString cfg.printOverrides ''
+                    # Print any keys that will be overridden
+                                      print_overrides "settings.json" "$TEMP_FILE.defaults" "$SETTINGS_PATH"''}
                   $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s ${jqMergeExpr} "$TEMP_FILE.defaults" "$SETTINGS_PATH" > "$TEMP_FILE"
                   $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$TEMP_FILE" "$SETTINGS_PATH"
                   $DRY_RUN_CMD ${pkgs.coreutils}/bin/rm -f "$TEMP_FILE.defaults"
@@ -259,16 +281,16 @@ in
     # Valid config values: "native", "global", "local"
     {
       home.activation.claudeCodeInstallMethod = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-                CLAUDE_JSON="${config.home.homeDirectory}/.claude.json"
-                # Create empty file if it doesn't exist
-                if [ ! -f "$CLAUDE_JSON" ]; then
-                  echo '{}' > "$CLAUDE_JSON"
-                fi
-                # Set installMethod based on variant
-                INSTALL_METHOD="${if cfg.variant == "npm" then "global" else "native"}"
-                TEMP_FILE=$(${pkgs.coreutils}/bin/mktemp)
-                $DRY_RUN_CMD ${pkgs.jq}/bin/jq --arg method "$INSTALL_METHOD" '.installMethod = $method' "$CLAUDE_JSON" > "$TEMP_FILE"
-                $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$TEMP_FILE" "$CLAUDE_JSON"
+        CLAUDE_JSON="${config.home.homeDirectory}/.claude.json"
+        # Create empty file if it doesn't exist
+        if [ ! -f "$CLAUDE_JSON" ]; then
+          echo '{}' > "$CLAUDE_JSON"
+        fi
+        # Set installMethod based on variant
+        INSTALL_METHOD="${if cfg.variant == "npm" then "global" else "native"}"
+        TEMP_FILE=$(${pkgs.coreutils}/bin/mktemp)
+        $DRY_RUN_CMD ${pkgs.jq}/bin/jq --arg method "$INSTALL_METHOD" '.installMethod = $method' "$CLAUDE_JSON" > "$TEMP_FILE"
+        $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$TEMP_FILE" "$CLAUDE_JSON"
       '';
     }
 
@@ -287,13 +309,24 @@ in
                 if [ ! -f "$MCP_PATH" ]; then
                   echo '{}' > "$MCP_PATH"
                 fi
-                ${optionalString cfg.printOverrides ''# Print any MCP servers that will be overridden
-                print_overrides "mcpServers" "$TEMP_FILE.nix" "$MCP_PATH" ".mcpServers"''}
+                ${optionalString cfg.printOverrides ''
+                  # Print any MCP servers that will be overridden
+                                  print_overrides "mcpServers" "$TEMP_FILE.nix" "$MCP_PATH" ".mcpServers"''}
                 # Deep merge: nix config wins for mcpServers
                 $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s ${jqMergeExpr} "$TEMP_FILE.nix" "$MCP_PATH" > "$TEMP_FILE"
                 $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$TEMP_FILE" "$MCP_PATH"
                 $DRY_RUN_CMD ${pkgs.coreutils}/bin/rm -f "$TEMP_FILE.nix"
       '';
+    })
+
+    # Custom slash commands (only when commandsDir defined)
+    (mkIf (cfg.commandsDir != null) {
+      home.file = mapAttrs' (relativePath: sourcePath: {
+        name = ".claude/commands/${relativePath}";
+        value = {
+          source = sourcePath;
+        };
+      }) (readDirRec cfg.commandsDir "");
     })
   ]);
 }
