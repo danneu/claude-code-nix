@@ -35,6 +35,9 @@
           npm = pkgs.claude-code-npm;
           # No default - forces explicit choice between native/npm
         };
+
+        # Tests for smartmerge function
+        checks = import ./tests { inherit pkgs; };
       }) // {
         overlays.default = overlay;
         homeManagerModules.default = import ./hm-module.nix;

@@ -24,11 +24,13 @@ let
       pkgs.claude-code-stable
     else
       pkgs.claude-code;
+  # Import shared smartmerge jq function
+  smartMergeScript = import ./lib/smartmerge.nix;
   jqMergeExpr =
     if cfg.mergeStrategy == "nix-wins" then
-      "'.[1] * .[0]'" # file first, then config overwrites
+      "${smartMergeScript} smartmerge(.[1]; .[0])" # file=base, nix=over (nix wins)
     else
-      "'.[0] * .[1]'"; # config first, then file overwrites
+      "${smartMergeScript} smartmerge(.[0]; .[1])"; # nix=base, file=over (file wins)
   hasSettings = cfg.settings != { };
   hasMcpServers = cfg.mcpServers != { };
 
@@ -270,7 +272,7 @@ in
                   ${optionalString cfg.printOverrides ''
                     # Print any keys that will be overridden
                                       print_overrides "settings.json" "$TEMP_FILE.defaults" "$SETTINGS_PATH"''}
-                  $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s ${jqMergeExpr} "$TEMP_FILE.defaults" "$SETTINGS_PATH" > "$TEMP_FILE"
+                  $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s '${jqMergeExpr}' "$TEMP_FILE.defaults" "$SETTINGS_PATH" > "$TEMP_FILE"
                   $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$TEMP_FILE" "$SETTINGS_PATH"
                   $DRY_RUN_CMD ${pkgs.coreutils}/bin/rm -f "$TEMP_FILE.defaults"
                 fi
@@ -313,7 +315,7 @@ in
                   # Print any MCP servers that will be overridden
                                   print_overrides "mcpServers" "$TEMP_FILE.nix" "$MCP_PATH" ".mcpServers"''}
                 # Deep merge: nix config wins for mcpServers
-                $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s ${jqMergeExpr} "$TEMP_FILE.nix" "$MCP_PATH" > "$TEMP_FILE"
+                $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s '${jqMergeExpr}' "$TEMP_FILE.nix" "$MCP_PATH" > "$TEMP_FILE"
                 $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$TEMP_FILE" "$MCP_PATH"
                 $DRY_RUN_CMD ${pkgs.coreutils}/bin/rm -f "$TEMP_FILE.nix"
       '';
