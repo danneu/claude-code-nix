@@ -5,12 +5,9 @@
 #   - npm package: ./scripts/update-npm.sh
 #   - Both: ./scripts/update-all.sh
 #
-# Native channels:
+# Channels (both native and npm):
 #   - stable: Production-ready releases
 #   - latest: Most recent release (may be ahead of stable)
-#
-# npm:
-#   - Single version from npm registry
 
 {
   stable = {
@@ -43,9 +40,15 @@
     };
   };
 
-  # npm package version
+  # npm package versions
   npm = {
-    version = "2.1.2";
-    sha256 = "08l24i6qbrjnaymqh2wr4z06yfh14k54id6gas347s5wmns50968";
+    stable = {
+      version = "2.1.2";
+      sha256 = "08l24i6qbrjnaymqh2wr4z06yfh14k54id6gas347s5wmns50968";
+    };
+    latest = {
+      version = "2.1.2";
+      sha256 = "08l24i6qbrjnaymqh2wr4z06yfh14k54id6gas347s5wmns50968";
+    };
   };
 }
