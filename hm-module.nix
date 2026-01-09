@@ -73,14 +73,6 @@ let
     }
   '';
 
-  # Shell function to apply sensitive permissions
-  sensitivePermsScript = ''
-    apply_sensitive_perms() {
-      local file_path="$1"
-      $DRY_RUN_CMD ${pkgs.coreutils}/bin/chmod 600 "$file_path"
-    }
-  '';
-
   # Shell function to print keys that will be overridden during merge
   # Usage: print_overrides "label" "new.json" "existing.json" ["jq_path"]
   printOverridesScript = ''
@@ -270,12 +262,6 @@ in
       description = "Fail activation if config keys would be overridden (strict mode)";
     };
 
-    sensitivePermissions = mkOption {
-      type = types.bool;
-      default = false;
-      description = "Apply restrictive permissions (600) to config files that may contain secrets like API keys in MCP env vars";
-    };
-
     backupBeforeMerge = mkOption {
       type = types.bool;
       default = false;
@@ -323,7 +309,6 @@ in
       # Merge nix settings into existing file
       home.activation.claudeCodeSettingsSync = lib.hm.dag.entryAfter [ "claudeCodeDefaults" ] ''
                 ${optionalString cfg.backupBeforeMerge backupScript}
-                ${optionalString cfg.sensitivePermissions sensitivePermsScript}
                 ${optionalString cfg.printOverrides printOverridesScript}
                 SETTINGS_PATH="${cfg.configDir}/settings.json"
                 if [ -f "$SETTINGS_PATH" ]; then
@@ -347,7 +332,6 @@ in
                     fi''}
                   $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s '${jqMergeExprSettings}' "$SETTINGS_TEMP_DEFAULTS" "$SETTINGS_PATH" > "$SETTINGS_TEMP"
                   $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$SETTINGS_TEMP" "$SETTINGS_PATH"
-                  ${optionalString cfg.sensitivePermissions "apply_sensitive_perms \"$SETTINGS_PATH\""}
                   _cleanup_settings
                   trap - EXIT
                 fi
@@ -358,7 +342,6 @@ in
     # Valid config values: "native", "global", "local"
     {
       home.activation.claudeCodeInstallMethod = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-        ${optionalString cfg.sensitivePermissions sensitivePermsScript}
         CLAUDE_JSON="${config.home.homeDirectory}/.claude.json"
         # Create empty file if it doesn't exist (respecting dry-run)
         if [ ! -f "$CLAUDE_JSON" ]; then
@@ -373,7 +356,6 @@ in
         trap _cleanup_install EXIT
         $DRY_RUN_CMD ${pkgs.jq}/bin/jq --arg method "$INSTALL_METHOD" '.installMethod = $method' "$CLAUDE_JSON" > "$INSTALL_TEMP"
         $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$INSTALL_TEMP" "$CLAUDE_JSON"
-        ${optionalString cfg.sensitivePermissions "apply_sensitive_perms \"$CLAUDE_JSON\""}
         _cleanup_install
         trap - EXIT
       '';
@@ -383,7 +365,6 @@ in
     (mkIf hasMcpServers {
       home.activation.claudeCodeMcpServers = lib.hm.dag.entryAfter [ "claudeCodeInstallMethod" ] ''
                 ${optionalString cfg.backupBeforeMerge backupScript}
-                ${optionalString cfg.sensitivePermissions sensitivePermsScript}
                 ${optionalString cfg.printOverrides printOverridesScript}
                 MCP_PATH="${config.home.homeDirectory}/.claude.json"
                 ${optionalString cfg.backupBeforeMerge "backup_file \"$MCP_PATH\""}
@@ -415,7 +396,6 @@ in
                 # Deep merge using configured strategy
                 $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s '${jqMergeExprMcp}' "$MCP_TEMP_NIX" "$MCP_PATH" > "$MCP_TEMP"
                 $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$MCP_TEMP" "$MCP_PATH"
-                ${optionalString cfg.sensitivePermissions "apply_sensitive_perms \"$MCP_PATH\""}
                 _cleanup_mcp
                 trap - EXIT
       '';
