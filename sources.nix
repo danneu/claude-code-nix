@@ -29,23 +29,23 @@
   };
 
   latest = {
-    version = "2.1.1";
+    version = "2.1.2";
     platforms = {
       "aarch64-darwin" = {
-        sha256 = "c7939fb4bd10bd0e5aca07f8cbc4cea85c6fccc71d367a58566d254eb13f2098";
+        sha256 = "4d9c45ef1932914d45f7d942fff65caa77330c28029846881f3d755d7b88120b";
       };
       "x86_64-linux" = {
-        sha256 = "7d630126bd6fa8372720a48055a85869741b076b143440045c89565cf3c65a28";
+        sha256 = "83ec742dd439a960bbe04dab1794e62fe62804bce9f62b94f3dc64ff802a0b28";
       };
       "aarch64-linux" = {
-        sha256 = "3ec039081a8bdd141fbd7f49ea68af747a070164925f9221b1b1218a8b4a5b27";
+        sha256 = "ad61c9b8a1767262bf4d40cb216a9038f1bdeca5b18a317c67f6bb6a29da4f23";
       };
     };
   };
 
   # npm package version
   npm = {
-    version = "2.1.1";
-    sha256 = "1sqn80dmbfwdczzzmc4bcy0wykl9wyf07gpr7x009hsk3ays5jd0";
+    version = "2.1.2";
+    sha256 = "08l24i6qbrjnaymqh2wr4z06yfh14k54id6gas347s5wmns50968";
   };
 }
