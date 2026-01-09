@@ -81,7 +81,6 @@ programs.claude-code = {
 
   # Optional behaviors
   printOverrides = true;      # Log when nix overrides existing values
-  failOnOverrides = false;    # Fail if nix would override existing values
   backupBeforeMerge = false;  # Backup configs before modifying
 };
 ```

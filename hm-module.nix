@@ -256,12 +256,6 @@ in
       description = "Print old values when config keys are overridden during activation";
     };
 
-    failOnOverrides = mkOption {
-      type = types.bool;
-      default = false;
-      description = "Fail activation if config keys would be overridden (strict mode)";
-    };
-
     backupBeforeMerge = mkOption {
       type = types.bool;
       default = false;
@@ -323,13 +317,6 @@ in
                   ${optionalString cfg.printOverrides ''
                     # Print any keys that will be overridden
                                       print_overrides "settings.json" "$SETTINGS_TEMP_DEFAULTS" "$SETTINGS_PATH"''}
-                  ${optionalString cfg.failOnOverrides ''
-                    # Check for overrides and fail if any found
-                    OVERRIDE_COUNT=$(print_overrides "settings.json" "$SETTINGS_TEMP_DEFAULTS" "$SETTINGS_PATH" 2>/dev/null | grep -c "Overriding" || echo 0)
-                    if [ "$OVERRIDE_COUNT" -gt 0 ]; then
-                      echo "ERROR: $OVERRIDE_COUNT override(s) detected in settings.json. Set failOnOverrides = false to allow." >&2
-                      exit 1
-                    fi''}
                   $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s '${jqMergeExprSettings}' "$SETTINGS_TEMP_DEFAULTS" "$SETTINGS_PATH" > "$SETTINGS_TEMP"
                   $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$SETTINGS_TEMP" "$SETTINGS_PATH"
                   _cleanup_settings
@@ -386,13 +373,6 @@ in
                 ${optionalString cfg.printOverrides ''
                   # Print any MCP servers that will be overridden
                                   print_overrides "mcpServers" "$MCP_TEMP_NIX" "$MCP_PATH" ".mcpServers"''}
-                ${optionalString cfg.failOnOverrides ''
-                  # Check for overrides and fail if any found
-                  OVERRIDE_COUNT=$(print_overrides "mcpServers" "$MCP_TEMP_NIX" "$MCP_PATH" ".mcpServers" 2>/dev/null | grep -c "Overriding" || echo 0)
-                  if [ "$OVERRIDE_COUNT" -gt 0 ]; then
-                    echo "ERROR: $OVERRIDE_COUNT override(s) detected in mcpServers. Set failOnOverrides = false to allow." >&2
-                    exit 1
-                  fi''}
                 # Deep merge using configured strategy
                 $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s '${jqMergeExprMcp}' "$MCP_TEMP_NIX" "$MCP_PATH" > "$MCP_TEMP"
                 $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$MCP_TEMP" "$MCP_PATH"
