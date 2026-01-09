@@ -68,12 +68,13 @@ if [ "$STABLE_NEEDS_UPDATE" = false ] && [ "$LATEST_NEEDS_UPDATE" = false ]; the
 fi
 
 # Fetch hashes for versions that need updating
-declare -A HASHES
+STABLE_HASH=""
+LATEST_HASH=""
 
 if [ "$STABLE_NEEDS_UPDATE" = true ]; then
     echo "Fetching hash for stable $STABLE_REMOTE..."
-    HASHES["stable"]=$(fetch_tarball_hash "$STABLE_REMOTE")
-    if [ -z "${HASHES["stable"]}" ]; then
+    STABLE_HASH=$(fetch_tarball_hash "$STABLE_REMOTE")
+    if [ -z "$STABLE_HASH" ]; then
         echo "Error: Failed to fetch tarball hash for stable"
         exit 1
     fi
@@ -81,8 +82,8 @@ fi
 
 if [ "$LATEST_NEEDS_UPDATE" = true ]; then
     echo "Fetching hash for latest $LATEST_REMOTE..."
-    HASHES["latest"]=$(fetch_tarball_hash "$LATEST_REMOTE")
-    if [ -z "${HASHES["latest"]}" ]; then
+    LATEST_HASH=$(fetch_tarball_hash "$LATEST_REMOTE")
+    if [ -z "$LATEST_HASH" ]; then
         echo "Error: Failed to fetch tarball hash for latest"
         exit 1
     fi
@@ -90,8 +91,8 @@ fi
 
 # Update sources.nix
 tmp_file=$(mktemp)
-awk -v stable_ver="$STABLE_REMOTE" -v stable_hash="${HASHES["stable"]:-}" \
-    -v latest_ver="$LATEST_REMOTE" -v latest_hash="${HASHES["latest"]:-}" \
+awk -v stable_ver="$STABLE_REMOTE" -v stable_hash="$STABLE_HASH" \
+    -v latest_ver="$LATEST_REMOTE" -v latest_hash="$LATEST_HASH" \
     -v stable_update="$STABLE_NEEDS_UPDATE" -v latest_update="$LATEST_NEEDS_UPDATE" '
 BEGIN { in_npm = 0; in_stable = 0; in_latest = 0 }
 /^  npm = \{/ { in_npm = 1 }
