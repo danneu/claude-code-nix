@@ -19,18 +19,28 @@ let
   cfg = config.programs.claude-code;
   package =
     if cfg.variant == "npm" then
-      pkgs.claude-code-npm
+      (if cfg.channel == "stable" then pkgs.claude-code-npm-stable else pkgs.claude-code-npm)
     else if cfg.channel == "stable" then
       pkgs.claude-code-stable
     else
       pkgs.claude-code;
-  # Import shared smartmerge jq function
+
+  # Import merge jq functions
   smartMergeScript = import ./lib/smartmerge.nix;
-  jqMergeExpr =
-    if cfg.mergeStrategy == "nix-wins" then
+  strictMergeScript = import ./lib/strictmerge.nix;
+
+  # Generate jq expression for a given merge strategy
+  jqExprForStrategy = strategy:
+    if strategy == "nix-only" then
+      "${strictMergeScript} strictmerge(.[1]; .[0])" # nix is source of truth
+    else if strategy == "nix-wins" then
       "${smartMergeScript} smartmerge(.[1]; .[0])" # file=base, nix=over (nix wins)
     else
       "${smartMergeScript} smartmerge(.[0]; .[1])"; # nix=base, file=over (file wins)
+
+  jqMergeExprSettings = jqExprForStrategy cfg.settingsMergeStrategy;
+  jqMergeExprMcp = jqExprForStrategy cfg.mcpServersMergeStrategy;
+
   hasSettings = cfg.settings != { };
   hasMcpServers = cfg.mcpServers != { };
 
@@ -46,6 +56,30 @@ let
       else
         { }
     ) (builtins.readDir dir);
+
+  # Shell function to create backup of a file before modification
+  backupScript = ''
+    backup_file() {
+      local file_path="$1"
+      if [ -f "$file_path" ]; then
+        local backup_dir="$(dirname "$file_path")/.backups"
+        local filename="$(basename "$file_path")"
+        local timestamp=$(${pkgs.coreutils}/bin/date +%Y%m%d_%H%M%S)
+        $DRY_RUN_CMD ${pkgs.coreutils}/bin/mkdir -p "$backup_dir"
+        $DRY_RUN_CMD ${pkgs.coreutils}/bin/cp "$file_path" "$backup_dir/$filename.$timestamp"
+        # Keep only last 5 backups
+        ls -t "$backup_dir/$filename."* 2>/dev/null | tail -n +6 | xargs -r ${pkgs.coreutils}/bin/rm -f
+      fi
+    }
+  '';
+
+  # Shell function to apply sensitive permissions
+  sensitivePermsScript = ''
+    apply_sensitive_perms() {
+      local file_path="$1"
+      $DRY_RUN_CMD ${pkgs.coreutils}/bin/chmod 600 "$file_path"
+    }
+  '';
 
   # Shell function to print keys that will be overridden during merge
   # Usage: print_overrides "label" "new.json" "existing.json" ["jq_path"]
@@ -113,7 +147,7 @@ in
         "latest"
       ];
       default = "latest";
-      description = "Release channel for native variant: 'stable' or 'latest'";
+      description = "Release channel: 'stable' or 'latest' (applies to both native and npm variants)";
     };
 
     settings = mkOption {
@@ -194,23 +228,58 @@ in
       '';
     };
 
-    mergeStrategy = mkOption {
+    settingsMergeStrategy = mkOption {
       type = types.enum [
         "file-wins"
         "nix-wins"
+        "nix-only"
       ];
       default = "nix-wins";
       description = ''
-        How to handle conflicts when deep-merging JSON:
+        Merge strategy for ~/.claude/settings.json:
         - "file-wins": existing file values take precedence
         - "nix-wins": nix config values take precedence (default)
+        - "nix-only": nix is source of truth, removes keys not in nix config
+      '';
+    };
+
+    mcpServersMergeStrategy = mkOption {
+      type = types.enum [
+        "file-wins"
+        "nix-wins"
+        "nix-only"
+      ];
+      default = "nix-wins";
+      description = ''
+        Merge strategy for mcpServers in ~/.claude.json:
+        - "file-wins": existing file values take precedence
+        - "nix-wins": nix config values take precedence (default)
+        - "nix-only": nix is source of truth, removes servers not in nix config
       '';
     };
 
     printOverrides = mkOption {
       type = types.bool;
-      default = false;
+      default = true;
       description = "Print old values when config keys are overridden during activation";
+    };
+
+    failOnOverrides = mkOption {
+      type = types.bool;
+      default = false;
+      description = "Fail activation if config keys would be overridden (strict mode)";
+    };
+
+    sensitivePermissions = mkOption {
+      type = types.bool;
+      default = false;
+      description = "Apply restrictive permissions (600) to config files that may contain secrets like API keys in MCP env vars";
+    };
+
+    backupBeforeMerge = mkOption {
+      type = types.bool;
+      default = false;
+      description = "Create timestamped backups in .backups/ before modifying config files";
     };
 
     configDir = mkOption {
@@ -228,15 +297,6 @@ in
   };
 
   config = mkIf cfg.enable (mkMerge [
-    # Assertions
-    {
-      assertions = [
-        {
-          assertion = cfg.variant == "native" || cfg.channel == "latest";
-          message = "programs.claude-code: 'channel' option only applies to native variant. Remove 'channel' when using variant = \"npm\".";
-        }
-      ];
-    }
 
     # Base config: package and PATH setup
     {
@@ -262,19 +322,34 @@ in
 
       # Merge nix settings into existing file
       home.activation.claudeCodeSettingsSync = lib.hm.dag.entryAfter [ "claudeCodeDefaults" ] ''
+                ${optionalString cfg.backupBeforeMerge backupScript}
+                ${optionalString cfg.sensitivePermissions sensitivePermsScript}
                 ${optionalString cfg.printOverrides printOverridesScript}
                 SETTINGS_PATH="${cfg.configDir}/settings.json"
                 if [ -f "$SETTINGS_PATH" ]; then
-                  TEMP_FILE=$(${pkgs.coreutils}/bin/mktemp)
-                  cat > "$TEMP_FILE.defaults" <<'DEFAULTS_EOF'
+                  ${optionalString cfg.backupBeforeMerge "backup_file \"$SETTINGS_PATH\""}
+                  SETTINGS_TEMP=$(${pkgs.coreutils}/bin/mktemp)
+                  SETTINGS_TEMP_DEFAULTS="$SETTINGS_TEMP.defaults"
+                  _cleanup_settings() { ${pkgs.coreutils}/bin/rm -f "$SETTINGS_TEMP" "$SETTINGS_TEMP_DEFAULTS" 2>/dev/null || true; }
+                  trap _cleanup_settings EXIT
+                  cat > "$SETTINGS_TEMP_DEFAULTS" <<'DEFAULTS_EOF'
         ${builtins.toJSON cfg.settings}
         DEFAULTS_EOF
                   ${optionalString cfg.printOverrides ''
                     # Print any keys that will be overridden
-                                      print_overrides "settings.json" "$TEMP_FILE.defaults" "$SETTINGS_PATH"''}
-                  $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s '${jqMergeExpr}' "$TEMP_FILE.defaults" "$SETTINGS_PATH" > "$TEMP_FILE"
-                  $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$TEMP_FILE" "$SETTINGS_PATH"
-                  $DRY_RUN_CMD ${pkgs.coreutils}/bin/rm -f "$TEMP_FILE.defaults"
+                                      print_overrides "settings.json" "$SETTINGS_TEMP_DEFAULTS" "$SETTINGS_PATH"''}
+                  ${optionalString cfg.failOnOverrides ''
+                    # Check for overrides and fail if any found
+                    OVERRIDE_COUNT=$(print_overrides "settings.json" "$SETTINGS_TEMP_DEFAULTS" "$SETTINGS_PATH" 2>/dev/null | grep -c "Overriding" || echo 0)
+                    if [ "$OVERRIDE_COUNT" -gt 0 ]; then
+                      echo "ERROR: $OVERRIDE_COUNT override(s) detected in settings.json. Set failOnOverrides = false to allow." >&2
+                      exit 1
+                    fi''}
+                  $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s '${jqMergeExprSettings}' "$SETTINGS_TEMP_DEFAULTS" "$SETTINGS_PATH" > "$SETTINGS_TEMP"
+                  $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$SETTINGS_TEMP" "$SETTINGS_PATH"
+                  ${optionalString cfg.sensitivePermissions "apply_sensitive_perms \"$SETTINGS_PATH\""}
+                  _cleanup_settings
+                  trap - EXIT
                 fi
       '';
     })
@@ -283,41 +358,66 @@ in
     # Valid config values: "native", "global", "local"
     {
       home.activation.claudeCodeInstallMethod = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+        ${optionalString cfg.sensitivePermissions sensitivePermsScript}
         CLAUDE_JSON="${config.home.homeDirectory}/.claude.json"
-        # Create empty file if it doesn't exist
+        # Create empty file if it doesn't exist (respecting dry-run)
         if [ ! -f "$CLAUDE_JSON" ]; then
-          echo '{}' > "$CLAUDE_JSON"
+          INIT_TEMP=$(${pkgs.coreutils}/bin/mktemp)
+          echo '{}' > "$INIT_TEMP"
+          $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$INIT_TEMP" "$CLAUDE_JSON"
         fi
         # Set installMethod based on variant
         INSTALL_METHOD="${if cfg.variant == "npm" then "global" else "native"}"
-        TEMP_FILE=$(${pkgs.coreutils}/bin/mktemp)
-        $DRY_RUN_CMD ${pkgs.jq}/bin/jq --arg method "$INSTALL_METHOD" '.installMethod = $method' "$CLAUDE_JSON" > "$TEMP_FILE"
-        $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$TEMP_FILE" "$CLAUDE_JSON"
+        INSTALL_TEMP=$(${pkgs.coreutils}/bin/mktemp)
+        _cleanup_install() { ${pkgs.coreutils}/bin/rm -f "$INSTALL_TEMP" 2>/dev/null || true; }
+        trap _cleanup_install EXIT
+        $DRY_RUN_CMD ${pkgs.jq}/bin/jq --arg method "$INSTALL_METHOD" '.installMethod = $method' "$CLAUDE_JSON" > "$INSTALL_TEMP"
+        $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$INSTALL_TEMP" "$CLAUDE_JSON"
+        ${optionalString cfg.sensitivePermissions "apply_sensitive_perms \"$CLAUDE_JSON\""}
+        _cleanup_install
+        trap - EXIT
       '';
     }
 
     # MCP servers config (only when mcpServers defined)
     (mkIf hasMcpServers {
       home.activation.claudeCodeMcpServers = lib.hm.dag.entryAfter [ "claudeCodeInstallMethod" ] ''
+                ${optionalString cfg.backupBeforeMerge backupScript}
+                ${optionalString cfg.sensitivePermissions sensitivePermsScript}
                 ${optionalString cfg.printOverrides printOverridesScript}
                 MCP_PATH="${config.home.homeDirectory}/.claude.json"
-                TEMP_FILE=$(${pkgs.coreutils}/bin/mktemp)
-                cat > "$TEMP_FILE.nix" <<'NIX_EOF'
+                ${optionalString cfg.backupBeforeMerge "backup_file \"$MCP_PATH\""}
+                MCP_TEMP=$(${pkgs.coreutils}/bin/mktemp)
+                MCP_TEMP_NIX="$MCP_TEMP.nix"
+                _cleanup_mcp() { ${pkgs.coreutils}/bin/rm -f "$MCP_TEMP" "$MCP_TEMP_NIX" 2>/dev/null || true; }
+                trap _cleanup_mcp EXIT
+                cat > "$MCP_TEMP_NIX" <<'NIX_EOF'
         ${builtins.toJSON {
           mcpServers = mapAttrs mkMcpServer cfg.mcpServers;
         }}
         NIX_EOF
-                # Create empty file if it doesn't exist
+                # Create empty file if it doesn't exist (respecting dry-run)
                 if [ ! -f "$MCP_PATH" ]; then
-                  echo '{}' > "$MCP_PATH"
+                  MCP_INIT_TEMP=$(${pkgs.coreutils}/bin/mktemp)
+                  echo '{}' > "$MCP_INIT_TEMP"
+                  $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$MCP_INIT_TEMP" "$MCP_PATH"
                 fi
                 ${optionalString cfg.printOverrides ''
                   # Print any MCP servers that will be overridden
-                                  print_overrides "mcpServers" "$TEMP_FILE.nix" "$MCP_PATH" ".mcpServers"''}
-                # Deep merge: nix config wins for mcpServers
-                $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s '${jqMergeExpr}' "$TEMP_FILE.nix" "$MCP_PATH" > "$TEMP_FILE"
-                $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$TEMP_FILE" "$MCP_PATH"
-                $DRY_RUN_CMD ${pkgs.coreutils}/bin/rm -f "$TEMP_FILE.nix"
+                                  print_overrides "mcpServers" "$MCP_TEMP_NIX" "$MCP_PATH" ".mcpServers"''}
+                ${optionalString cfg.failOnOverrides ''
+                  # Check for overrides and fail if any found
+                  OVERRIDE_COUNT=$(print_overrides "mcpServers" "$MCP_TEMP_NIX" "$MCP_PATH" ".mcpServers" 2>/dev/null | grep -c "Overriding" || echo 0)
+                  if [ "$OVERRIDE_COUNT" -gt 0 ]; then
+                    echo "ERROR: $OVERRIDE_COUNT override(s) detected in mcpServers. Set failOnOverrides = false to allow." >&2
+                    exit 1
+                  fi''}
+                # Deep merge using configured strategy
+                $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s '${jqMergeExprMcp}' "$MCP_TEMP_NIX" "$MCP_PATH" > "$MCP_TEMP"
+                $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$MCP_TEMP" "$MCP_PATH"
+                ${optionalString cfg.sensitivePermissions "apply_sensitive_perms \"$MCP_PATH\""}
+                _cleanup_mcp
+                trap - EXIT
       '';
     })
 

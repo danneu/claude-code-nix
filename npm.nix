@@ -12,17 +12,19 @@
 , nodejs_22
 , cacert
 , bash
+, channel ? "latest"  # "stable" or "latest"
 }:
 
 let
   sources = import ./sources.nix;
-  version = sources.npm.version;
+  channelSrc = sources.npm.${channel};
+  version = channelSrc.version;
 
   # Pre-fetch the npm package as a Fixed Output Derivation
   # This allows network access during fetch phase for sandbox compatibility
   claudeCodeTarball = fetchurl {
     url = "https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-${version}.tgz";
-    inherit (sources.npm) sha256;
+    inherit (channelSrc) sha256;
   };
 in
 stdenv.mkDerivation {

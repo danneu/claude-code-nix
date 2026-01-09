@@ -56,13 +56,21 @@ jobs:
         run: |
           set -euo pipefail
 
-          NPM_REMOTE=$(curl -fsSL "https://registry.npmjs.org/@anthropic-ai/claude-code/latest" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')
-          NPM_LOCAL=$(grep -A2 '^  npm = {' sources.nix | grep 'version' | sed 's/.*"\([^"]*\)".*/\1/')
+          # Fetch dist-tags from npm registry
+          DIST_TAGS=$(curl -fsSL "https://registry.npmjs.org/@anthropic-ai/claude-code" | sed -n 's/.*"dist-tags":\({[^}]*}\).*/\1/p')
+          NPM_STABLE_REMOTE=$(echo "$DIST_TAGS" | sed -n 's/.*"stable":"\([^"]*\)".*/\1/p')
+          NPM_LATEST_REMOTE=$(echo "$DIST_TAGS" | sed -n 's/.*"latest":"\([^"]*\)".*/\1/p')
 
-          echo "npm_remote=$NPM_REMOTE" >> $GITHUB_OUTPUT
-          echo "npm_local=$NPM_LOCAL" >> $GITHUB_OUTPUT
+          # Get local versions from sources.nix
+          NPM_STABLE_LOCAL=$(sed -n '/^  npm = {/,/^  };/p' sources.nix | grep -A2 'stable = {' | grep 'version' | sed 's/.*"\([^"]*\)".*/\1/')
+          NPM_LATEST_LOCAL=$(sed -n '/^  npm = {/,/^  };/p' sources.nix | grep -A2 'latest = {' | grep 'version' | sed 's/.*"\([^"]*\)".*/\1/')
 
-          if [ "$NPM_REMOTE" != "$NPM_LOCAL" ]; then
+          echo "npm_stable_remote=$NPM_STABLE_REMOTE" >> $GITHUB_OUTPUT
+          echo "npm_latest_remote=$NPM_LATEST_REMOTE" >> $GITHUB_OUTPUT
+          echo "npm_stable_local=$NPM_STABLE_LOCAL" >> $GITHUB_OUTPUT
+          echo "npm_latest_local=$NPM_LATEST_LOCAL" >> $GITHUB_OUTPUT
+
+          if [ "$NPM_STABLE_REMOTE" != "$NPM_STABLE_LOCAL" ] || [ "$NPM_LATEST_REMOTE" != "$NPM_LATEST_LOCAL" ]; then
             echo "needs_update=true" >> $GITHUB_OUTPUT
           else
             echo "needs_update=false" >> $GITHUB_OUTPUT
@@ -92,15 +100,17 @@ jobs:
 
           if [ "${{ steps.check-npm.outputs.needs_update }}" = "true" ]; then
             if [ -n "$TITLE_PARTS" ]; then
-              TITLE_PARTS="$TITLE_PARTS; npm: ${{ steps.check-npm.outputs.npm_remote }}"
+              TITLE_PARTS="$TITLE_PARTS; npm: stable ${{ steps.check-npm.outputs.npm_stable_remote }}, latest ${{ steps.check-npm.outputs.npm_latest_remote }}"
             else
-              TITLE_PARTS="npm: ${{ steps.check-npm.outputs.npm_remote }}"
+              TITLE_PARTS="npm: stable ${{ steps.check-npm.outputs.npm_stable_remote }}, latest ${{ steps.check-npm.outputs.npm_latest_remote }}"
             fi
             if [ -n "$BODY_LINES" ]; then
               BODY_LINES="$BODY_LINES
-          - npm: ${{ steps.check-npm.outputs.npm_local }} → ${{ steps.check-npm.outputs.npm_remote }}"
+          - npm stable: ${{ steps.check-npm.outputs.npm_stable_local }} → ${{ steps.check-npm.outputs.npm_stable_remote }}
+          - npm latest: ${{ steps.check-npm.outputs.npm_latest_local }} → ${{ steps.check-npm.outputs.npm_latest_remote }}"
             else
-              BODY_LINES="- npm: ${{ steps.check-npm.outputs.npm_local }} → ${{ steps.check-npm.outputs.npm_remote }}"
+              BODY_LINES="- npm stable: ${{ steps.check-npm.outputs.npm_stable_local }} → ${{ steps.check-npm.outputs.npm_stable_remote }}
+          - npm latest: ${{ steps.check-npm.outputs.npm_latest_local }} → ${{ steps.check-npm.outputs.npm_latest_remote }}"
             fi
           fi
 

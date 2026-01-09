@@ -1,115 +1,97 @@
 # claude-code-nix
 
-Nix flake for [Claude Code](https://claude.ai/code) with support for both the native binary and Node.js variants.
+Nix flake for [Claude Code](https://claude.ai/code).
 
-## Variants
+## Packages
 
-| Variant    | Description                               | Packages                         |
-| ---------- | ----------------------------------------- | -------------------------------- |
-| **Native** | Official native binary                    | `native-latest`, `native-stable` |
-| **NPM**    | npm package (`@anthropic-ai/claude-code`) | `npm`                            |
+| Package | Description |
+|---------|-------------|
+| `native-latest` | Native binary, latest channel |
+| `native-stable` | Native binary, stable channel |
+| `npm-latest` | npm package, latest channel |
+| `npm-stable` | npm package, stable channel |
 
-Supported systems: `aarch64-darwin`, `x86_64-linux`, `aarch64-linux`
+Supported: `aarch64-darwin`, `x86_64-linux`, `aarch64-linux`
 
-## Installation
+## Version Pinning
 
-Add to your flake inputs:
+Pin to a specific version using git tags:
 
 ```nix
+# Pin to npm 2.1.2
+inputs.claude-code.url = "github:danneu/claude-code-nix?ref=npm-2.1.2";
+
+# Pin to native 2.0.75
+inputs.claude-code.url = "github:danneu/claude-code-nix?ref=native-2.0.75";
+```
+
+Tags follow the `latest` channel. Available tags: `npm-X.Y.Z`, `native-X.Y.Z`
+
+## Quick Start
+
+```nix
+# flake.nix
 inputs.claude-code.url = "github:danneu/claude-code-nix";
-```
 
-Add the overlay and home-manager module:
+# configuration.nix or home.nix
+nixpkgs.overlays = [ inputs.claude-code.overlays.default ];
+home-manager.sharedModules = [ inputs.claude-code.homeManagerModules.default ];
+```
 
 ```nix
-nixpkgs.overlays = [ claude-code.overlays.default ];
-home-manager.sharedModules = [ claude-code.homeManagerModules.default ];
+# home.nix
+programs.claude-code.enable = true;
 ```
 
-Enable in home.nix:
-
-```nix
-programs.claude-code = {
-  enable = true;
-  variant = "native";  # "native" (default) or "npm"
-  channel = "latest";  # "latest" (default) or "stable" - only for native variant
-};
-```
-
-## Standalone Usage
-
-Build directly without home-manager:
+## Standalone
 
 ```bash
-# Native binary
 nix build github:danneu/claude-code-nix#native-latest
-nix build github:danneu/claude-code-nix#native-stable
-
-# npm version
-nix build github:danneu/claude-code-nix#npm
+nix run github:danneu/claude-code-nix#npm-stable
 ```
 
-## Configuration Options
+## Options
 
 ```nix
 programs.claude-code = {
   enable = true;
+  variant = "native";  # "native" | "npm"
+  channel = "latest";  # "latest" | "stable"
 
-  # Which variant to use
-  variant = "native";  # "native" (default) or "npm"
-
-  # Release channel (only applies to native variant)
-  channel = "latest";  # "latest" (default) or "stable"
-
-  # Merge strategy for JSON config files
-  # "nix-wins" (default): nix values override existing file values
-  # "file-wins": existing file values take precedence
-  mergeStrategy = "nix-wins";
-
-  # Settings merged into ~/.claude/settings.json
+  # ~/.claude/settings.json
   settings = {
     alwaysThinkingEnabled = true;
-    env = {
-      MAX_THINKING_TOKENS = "16000";
+    env.MAX_THINKING_TOKENS = "16000";
+  };
+
+  # ~/.claude.json mcpServers
+  mcpServers = {
+    playwright = {
+      command = "npx";
+      args = [ "-y" "@playwright/mcp@latest" ];
     };
   };
 
-  # MCP servers merged into ~/.claude.json
-  mcpServers = {
-    # stdio server example
-    playwright = {
-      type = "stdio";
-      command = "npx";
-      args = [ "-y" "@playwright/mcp@latest" ];
-      env = { };
-    };
-    # http server example
-    my-server = {
-      type = "http";
-      url = "http://localhost:3000/mcp";
-      headers = { };
-    };
-  };
+  # Custom slash commands from a directory
+  commandsDir = ./claude-commands;
+
+  # Merge strategies: "nix-wins" (default) | "file-wins" | "nix-only"
+  settingsMergeStrategy = "nix-wins";
+  mcpServersMergeStrategy = "nix-wins";
+
+  # Optional behaviors
+  printOverrides = true;      # Log when nix overrides existing values
+  failOnOverrides = false;    # Fail if nix would override existing values
+  backupBeforeMerge = false;  # Backup configs before modifying
+  sensitivePermissions = false; # chmod 600 on config files
 };
 ```
 
-## Overlay Packages
-
-When using the overlay, these packages are available:
+## Overlay
 
 ```nix
-pkgs.claude-code        # native binary (latest channel)
-pkgs.claude-code-stable # native binary (stable channel)
-pkgs.claude-code-npm    # npm version
-```
-
-## Development
-
-Update scripts for maintainers:
-
-```bash
-./scripts/update-native.sh        # Update native binary (stable + latest)
-./scripts/update-native.sh latest # Update only latest channel
-./scripts/update-npm.sh           # Update npm package
-./scripts/update-all.sh           # Update everything
+pkgs.claude-code          # native-latest
+pkgs.claude-code-stable   # native-stable
+pkgs.claude-code-npm      # npm-latest
+pkgs.claude-code-npm-stable
 ```

@@ -1,0 +1,38 @@
+name: Tag Versions
+
+on:
+  push:
+    branches: [master]
+    paths: [sources.nix]
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create version tags
+        run: |
+          # Get latest channel versions (tags based on latest, not stable)
+          NATIVE=$(grep -A2 '^  latest = {' sources.nix | grep 'version' | head -1 | sed 's/.*"\([^"]*\)".*/\1/')
+          NPM=$(sed -n '/^  npm = {/,/^  };/p' sources.nix | grep -A2 'latest = {' | grep 'version' | sed 's/.*"\([^"]*\)".*/\1/')
+
+          echo "Native latest version: $NATIVE"
+          echo "NPM latest version: $NPM"
+
+          # Create tags if they don't exist
+          for tag in "native-$NATIVE" "npm-$NPM"; do
+            if ! git rev-parse "$tag" >/dev/null 2>&1; then
+              echo "Creating tag: $tag"
+              git tag "$tag"
+            else
+              echo "Tag already exists: $tag"
+            fi
+          done
+
+          # Push any new tags
+          git push --tags
