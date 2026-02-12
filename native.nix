@@ -62,7 +62,7 @@ stdenv.mkDerivation {
     # Create wrapper as 'claude'
     makeWrapper $out/libexec/claude $out/bin/claude \
       --set DISABLE_AUTOUPDATER 1 \
-      --set CLAUDE_EXECUTABLE_PATH "\$HOME/.local/bin/claude"
+      --set CLAUDE_EXECUTABLE_PATH "$out/bin/claude"
 
     runHook postInstall
   '';
