@@ -44,6 +44,12 @@ stdenv.mkDerivation {
 
   nativeBuildInputs = [ makeWrapper ];
 
+  # Disable fixup phases that can strip/modify the binary.
+  # Nix's strip and patchelf phases truncate the appended Bun SEA
+  # payload, leaving only the bare Bun runtime.
+  dontStrip = true;
+  dontPatchELF = true;
+
   installPhase = ''
     runHook preInstall
 
