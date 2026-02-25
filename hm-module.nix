@@ -28,6 +28,7 @@ let
   # Import merge jq functions
   smartMergeScript = import ./lib/smartmerge.nix;
   strictMergeScript = import ./lib/strictmerge.nix;
+  deepDiffScript = import ./lib/deepdiff.nix;
 
   # Generate jq expression for a given merge strategy
   jqExprForStrategy = strategy:
@@ -94,6 +95,23 @@ let
         select($existing | has($key)) |
         select($new[$key] != $existing[$key]) |
         "\u001b[33m[\($label)] Overriding \($key):\u001b[0m\n  Old: \($existing[$key] | @json)\n  New: \($new[$key] | @json)"
+      ' -s "$new_file" "$existing_file" 2>/dev/null || true
+    }
+  '';
+
+  # Shell function to print leaf-level diffs using deepdiff (for nested objects like .claude.json)
+  # Usage: print_overrides_deep "label" "new.json" "existing.json"
+  printOverridesDeepScript = ''
+    print_overrides_deep() {
+      local label="$1"
+      local new_file="$2"
+      local existing_file="$3"
+
+      ${pkgs.jq}/bin/jq -r --arg label "$label" '
+        ${deepDiffScript}
+        . as [$nix, $existing] |
+        deepdiff($existing; $nix; "") |
+        "\u001b[33m[\($label)] Overriding \(.path):\u001b[0m\n  Old: \(if .old == null then "(new key)" else (.old | @json) end)\n  New: \(.new | @json)"
       ' -s "$new_file" "$existing_file" 2>/dev/null || true
     }
   '';
@@ -415,7 +433,7 @@ in
     (mkIf hasClaudeJson {
       home.activation.claudeCodeClaudeJsonSync = lib.hm.dag.entryAfter [ "claudeCodeInstallMethod" ] ''
                 ${optionalString cfg.backupBeforeMerge backupScript}
-                ${optionalString cfg.printOverrides printOverridesScript}
+                ${optionalString cfg.printOverrides printOverridesDeepScript}
                 CLAUDE_JSON="${config.home.homeDirectory}/.claude.json"
                 ${optionalString cfg.backupBeforeMerge "backup_file \"$CLAUDE_JSON\""}
                 CLAUDE_JSON_TEMP=$(${pkgs.coreutils}/bin/mktemp)
@@ -426,7 +444,7 @@ in
       ${builtins.toJSON cfg.claudeJson}
       CLAUDE_JSON_NIX_EOF
                 ${optionalString cfg.printOverrides ''
-                  print_overrides ".claude.json" "$CLAUDE_JSON_TEMP_NIX" "$CLAUDE_JSON"''}
+                  print_overrides_deep ".claude.json" "$CLAUDE_JSON_TEMP_NIX" "$CLAUDE_JSON"''}
                 $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s '${jqMergeExprClaudeJson}' "$CLAUDE_JSON_TEMP_NIX" "$CLAUDE_JSON" > "$CLAUDE_JSON_TEMP"
                 $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$CLAUDE_JSON_TEMP" "$CLAUDE_JSON"
                 _cleanup_claude_json
