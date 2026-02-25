@@ -93,3 +93,13 @@ pkgs.claude-code-stable   # native-stable
 pkgs.claude-code-npm      # npm-latest
 pkgs.claude-code-npm-stable
 ```
+
+## Development
+
+```bash
+# Run tests
+nix flake check
+
+# Run tests with verbose output (shows test names)
+nix flake check -L
+```
