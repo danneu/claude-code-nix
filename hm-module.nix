@@ -40,9 +40,11 @@ let
 
   jqMergeExprSettings = jqExprForStrategy cfg.settingsMergeStrategy;
   jqMergeExprMcp = jqExprForStrategy cfg.mcpServersMergeStrategy;
+  jqMergeExprClaudeJson = jqExprForStrategy cfg.claudeJsonMergeStrategy;
 
   hasSettings = cfg.settings != { };
   hasMcpServers = cfg.mcpServers != { };
+  hasClaudeJson = cfg.claudeJson != { };
 
   # Recursively read a directory, returning { "relative/path.md" = "/abs/path.md"; ... }
   readDirRec =
@@ -250,6 +252,34 @@ in
       '';
     };
 
+    claudeJson = mkOption {
+      type = types.attrs;
+      default = { };
+      description = "Arbitrary keys to merge into ~/.claude.json";
+      example = literalExpression ''
+        {
+          cachedGrowthBookFeatures = {
+            tengu_copper_bridge = false;
+          };
+        }
+      '';
+    };
+
+    claudeJsonMergeStrategy = mkOption {
+      type = types.enum [
+        "file-wins"
+        "nix-wins"
+        "nix-only"
+      ];
+      default = "nix-wins";
+      description = ''
+        Merge strategy for extra keys in ~/.claude.json:
+        - "file-wins": existing file values take precedence
+        - "nix-wins": nix config values take precedence (default)
+        - "nix-only": nix is source of truth, removes keys not in nix config
+      '';
+    };
+
     printOverrides = mkOption {
       type = types.bool;
       default = true;
@@ -377,6 +407,29 @@ in
                 $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s '${jqMergeExprMcp}' "$MCP_TEMP_NIX" "$MCP_PATH" > "$MCP_TEMP"
                 $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$MCP_TEMP" "$MCP_PATH"
                 _cleanup_mcp
+                trap - EXIT
+      '';
+    })
+
+    # Extra ~/.claude.json keys (only when claudeJson defined)
+    (mkIf hasClaudeJson {
+      home.activation.claudeCodeClaudeJsonSync = lib.hm.dag.entryAfter [ "claudeCodeInstallMethod" ] ''
+                ${optionalString cfg.backupBeforeMerge backupScript}
+                ${optionalString cfg.printOverrides printOverridesScript}
+                CLAUDE_JSON="${config.home.homeDirectory}/.claude.json"
+                ${optionalString cfg.backupBeforeMerge "backup_file \"$CLAUDE_JSON\""}
+                CLAUDE_JSON_TEMP=$(${pkgs.coreutils}/bin/mktemp)
+                CLAUDE_JSON_TEMP_NIX="$CLAUDE_JSON_TEMP.nix"
+                _cleanup_claude_json() { ${pkgs.coreutils}/bin/rm -f "$CLAUDE_JSON_TEMP" "$CLAUDE_JSON_TEMP_NIX" 2>/dev/null || true; }
+                trap _cleanup_claude_json EXIT
+                cat > "$CLAUDE_JSON_TEMP_NIX" <<'CLAUDE_JSON_NIX_EOF'
+      ${builtins.toJSON cfg.claudeJson}
+      CLAUDE_JSON_NIX_EOF
+                ${optionalString cfg.printOverrides ''
+                  print_overrides ".claude.json" "$CLAUDE_JSON_TEMP_NIX" "$CLAUDE_JSON"''}
+                $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s '${jqMergeExprClaudeJson}' "$CLAUDE_JSON_TEMP_NIX" "$CLAUDE_JSON" > "$CLAUDE_JSON_TEMP"
+                $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$CLAUDE_JSON_TEMP" "$CLAUDE_JSON"
+                _cleanup_claude_json
                 trap - EXIT
       '';
     })
