@@ -11,16 +11,16 @@
 
 {
   stable = {
-    version = "2.1.58";
+    version = "2.1.62";
     platforms = {
       "aarch64-darwin" = {
-        sha256 = "182c20c6080d042e4e08a6b2a2ce8258c1a50e53c01d36ddf20a82b4693395ea";
+        sha256 = "94f813561519676a95135e3d3631cbc74a14883222af20def6d5040d193cd5e7";
       };
       "x86_64-linux" = {
-        sha256 = "10f68e45b5ff4a80ae21e6d7a95dfe673ab3391313358ccd94e827f379f6aaa0";
+        sha256 = "d6f0726cb8e94b7a30c243964529ba9135e642c40d2134ca09f5f845071471b4";
       };
       "aarch64-linux" = {
-        sha256 = "5edd4b6be6b9e9c00e5805f022ee924a98fdcf1bf0c04635a429d2666eccbc3f";
+        sha256 = "696c2f2a22a23375e9d7ee26af0aff417cd4a3a8cb704f24e4ba9c74a4c78d37";
       };
     };
   };
@@ -43,8 +43,8 @@
   # npm package versions
   npm = {
     stable = {
-      version = "2.1.58";
-      sha256 = "065dkk0bnh408n6kdccqjhfqw7k20d231ky0m9ic93r6nhdnma8n";
+      version = "2.1.62";
+      sha256 = "0bnd4pwnb6rbd62j2h969bal45c4nxxhs44895l8n14xzjk21njf";
     };
     latest = {
       version = "2.1.78";
