@@ -10,6 +10,8 @@
 , stdenv
 , fetchurl
 , makeWrapper
+, autoPatchelfHook
+, zlib
 , channel ? "latest"  # "stable" or "latest"
 }:
 
@@ -42,13 +44,18 @@ stdenv.mkDerivation {
 
   dontUnpack = true;
 
-  nativeBuildInputs = [ makeWrapper ];
+  nativeBuildInputs = [ makeWrapper ]
+    ++ lib.optionals stdenv.hostPlatform.isLinux [ autoPatchelfHook ];
 
-  # Disable fixup phases that can strip/modify the binary.
-  # Nix's strip and patchelf phases truncate the appended Bun SEA
-  # payload, leaving only the bare Bun runtime.
+  buildInputs = lib.optionals stdenv.hostPlatform.isLinux [
+    stdenv.cc.cc.lib
+    zlib
+  ];
+
+  # Nix's strip phase truncates the appended Bun SEA payload, leaving
+  # only the bare Bun runtime. patchelf (via autoPatchelfHook) is safe —
+  # it patches the ELF interpreter in-place without resizing the binary.
   dontStrip = true;
-  dontPatchELF = true;
 
   installPhase = ''
     runHook preInstall
@@ -62,6 +69,7 @@ stdenv.mkDerivation {
     # Create wrapper as 'claude'
     makeWrapper $out/libexec/claude $out/bin/claude \
       --set DISABLE_AUTOUPDATER 1 \
+      --set DISABLE_INSTALLATION_CHECKS 1 \
       --set CLAUDE_EXECUTABLE_PATH "$out/bin/claude"
 
     runHook postInstall
