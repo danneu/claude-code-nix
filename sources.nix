@@ -11,31 +11,31 @@
 
 {
   stable = {
-    version = "2.1.92";
+    version = "2.1.97";
     platforms = {
       "aarch64-darwin" = {
-        sha256 = "6d1b9657727dce81332b3cda11bfe0a8c83e2392e3c062a31022e10b0e71cdd1";
+        sha256 = "9104eba60ca82c590ababc5eee0d01f2dc5440d7cf2d668e4c48d6485e41cfeb";
       };
       "x86_64-linux" = {
-        sha256 = "e22324514967ff2d5e9f91f0ee37e4675bf8b6dfec27fafb19cb25cc5b23fcaf";
+        sha256 = "0d43fcd11d29206563eeef3a1f787f0615c21cd703cc91f3a180915fd5797ef6";
       };
       "aarch64-linux" = {
-        sha256 = "08deb3d56477496eb92e624f492e25b123f4527dd5674f71afff58a48eccd953";
+        sha256 = "85167cb721655fdd90b002012a28eca273c89dc2fd709be49afe2a7724c365a0";
       };
     };
   };
 
   latest = {
-    version = "2.1.110";
+    version = "2.1.111";
     platforms = {
       "aarch64-darwin" = {
-        sha256 = "f45cb1b0765f9fc592d36d7153f6c1ff0ecfc3ae9cbc997eaff2b0cd25bff9f6";
+        sha256 = "2620cc83dbee72c24858b3519ce5de050fef91f0d3d17b309176d61e679f95ee";
       };
       "x86_64-linux" = {
-        sha256 = "7ecdde57b002d5927e704dcbce04eaafb923644d315259ba2e6ac6f0712163a4";
+        sha256 = "5d4df970040b0f83aac434ae540b409126a4778a379e8c9b4c793560e3bfa060";
       };
       "aarch64-linux" = {
-        sha256 = "ff5bf0372d1700cfb4d232021c6e0d417205c16392492da0fabc6b509eeee92a";
+        sha256 = "99376866bf7ec367142d3be548c17184a79f30a97318441ee9a00f78e51246e7";
       };
     };
   };
@@ -43,12 +43,12 @@
   # npm package versions
   npm = {
     stable = {
-      version = "2.1.92";
-      sha256 = "0iwkfjb3nq95b9iz1hng2i3vdcdb2aph35jmaccagcz62vwqby7z";
+      version = "2.1.97";
+      sha256 = "12ls9cay68zzadj8wjvldc83k30ks1sgj1rlnyy2a2fx7s48xpsr";
     };
     latest = {
-      version = "2.1.110";
-      sha256 = "0n3ayyavi1nsl6fj1g3wjjsrvb0pckzrq09vw6z96y5jwax8vrm9";
+      version = "2.1.111";
+      sha256 = "067g0zyypl4l73062hkdbid2yyha3326ydmw4dsr2rd48zjm26nv";
     };
   };
 }
