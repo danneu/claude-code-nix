@@ -26,16 +26,16 @@
   };
 
   latest = {
-    version = "2.1.138";
+    version = "2.1.139";
     platforms = {
       "aarch64-darwin" = {
-        sha256 = "759d23ce626193c89bc8b35c5c6ca8a9e33b9c2e504ee143e4cd119988774097";
+        sha256 = "aa8a0a39f2abbd9e09518eb7268cda105b8029620a38f5a5cbc362b65331c3db";
       };
       "x86_64-linux" = {
-        sha256 = "c3c56ffbc12cf16e40c33687c9fe6361ed250c35a9e1718d0c38d49049f5f8c3";
+        sha256 = "c1800a0ae51b5a4c7b33be6a32d62b6169d93f6174119b2eeb6896cf0cd5d7e6";
       };
       "aarch64-linux" = {
-        sha256 = "693ecca41a62d58fee660884bd982ca5cdeab5b277925fcdfe880cdf02f98671";
+        sha256 = "3985aaf75b3bff1d8d031b726c804e4152e1530261683cdce14e954f0af2c912";
       };
     };
   };
@@ -47,8 +47,8 @@
       sha256 = "186lzlphd1jnhg0z2xqq3hljrnxrrfcp2cnkhhgz8z7nsb23sxrb";
     };
     latest = {
-      version = "2.1.138";
-      sha256 = "0jyy6wb681kbi1pg7k4x0c9jzfzk0h5l48pl1vkrixw5lshiqjvx";
+      version = "2.1.139";
+      sha256 = "1c2nzl24f5zskz4npczaph1m1sfjz75vfm211xw0mm321m82q7j1";
     };
   };
 }
