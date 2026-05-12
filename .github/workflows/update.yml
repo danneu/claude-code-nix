@@ -18,7 +18,7 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
 
-      - name: Check for native updates
+      - name: Check for updates
         id: check-native
         run: |
           set -euo pipefail
@@ -51,68 +51,18 @@ jobs:
             echo "needs_update=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Check for npm updates
-        id: check-npm
-        run: |
-          set -euo pipefail
-
-          # Fetch dist-tags from npm registry
-          DIST_TAGS=$(curl -fsSL "https://registry.npmjs.org/@anthropic-ai/claude-code" | sed -n 's/.*"dist-tags":\({[^}]*}\).*/\1/p')
-          NPM_STABLE_REMOTE=$(echo "$DIST_TAGS" | sed -n 's/.*"stable":"\([^"]*\)".*/\1/p')
-          NPM_LATEST_REMOTE=$(echo "$DIST_TAGS" | sed -n 's/.*"latest":"\([^"]*\)".*/\1/p')
-
-          # Get local versions from sources.nix
-          NPM_STABLE_LOCAL=$(sed -n '/^  npm = {/,/^  };/p' sources.nix | grep -A2 'stable = {' | grep 'version' | sed 's/.*"\([^"]*\)".*/\1/')
-          NPM_LATEST_LOCAL=$(sed -n '/^  npm = {/,/^  };/p' sources.nix | grep -A2 'latest = {' | grep 'version' | sed 's/.*"\([^"]*\)".*/\1/')
-
-          echo "npm_stable_remote=$NPM_STABLE_REMOTE" >> $GITHUB_OUTPUT
-          echo "npm_latest_remote=$NPM_LATEST_REMOTE" >> $GITHUB_OUTPUT
-          echo "npm_stable_local=$NPM_STABLE_LOCAL" >> $GITHUB_OUTPUT
-          echo "npm_latest_local=$NPM_LATEST_LOCAL" >> $GITHUB_OUTPUT
-
-          if [ "$NPM_STABLE_REMOTE" != "$NPM_STABLE_LOCAL" ] || [ "$NPM_LATEST_REMOTE" != "$NPM_LATEST_LOCAL" ]; then
-            echo "needs_update=true" >> $GITHUB_OUTPUT
-          else
-            echo "needs_update=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Run native update script
+      - name: Run update script
         if: steps.check-native.outputs.needs_update == 'true'
         run: ./scripts/update-native.sh
 
-      - name: Run npm update script
-        if: steps.check-npm.outputs.needs_update == 'true'
-        run: ./scripts/update-npm.sh
-
       - name: Build PR title and body
-        if: steps.check-native.outputs.needs_update == 'true' || steps.check-npm.outputs.needs_update == 'true'
+        if: steps.check-native.outputs.needs_update == 'true'
         id: pr-info
         run: |
-          TITLE_PARTS=""
-          BODY_LINES=""
-
-          if [ "${{ steps.check-native.outputs.needs_update }}" = "true" ]; then
-            TITLE_PARTS="native: stable ${{ steps.check-native.outputs.stable_remote }}, latest ${{ steps.check-native.outputs.latest_remote }}"
-            BODY_LINES="- native stable: ${{ steps.check-native.outputs.stable_local }} → ${{ steps.check-native.outputs.stable_remote }}"
-            BODY_LINES="$BODY_LINES
-          - native latest: ${{ steps.check-native.outputs.latest_local }} → ${{ steps.check-native.outputs.latest_remote }}"
-          fi
-
-          if [ "${{ steps.check-npm.outputs.needs_update }}" = "true" ]; then
-            if [ -n "$TITLE_PARTS" ]; then
-              TITLE_PARTS="$TITLE_PARTS; npm: stable ${{ steps.check-npm.outputs.npm_stable_remote }}, latest ${{ steps.check-npm.outputs.npm_latest_remote }}"
-            else
-              TITLE_PARTS="npm: stable ${{ steps.check-npm.outputs.npm_stable_remote }}, latest ${{ steps.check-npm.outputs.npm_latest_remote }}"
-            fi
-            if [ -n "$BODY_LINES" ]; then
-              BODY_LINES="$BODY_LINES
-          - npm stable: ${{ steps.check-npm.outputs.npm_stable_local }} → ${{ steps.check-npm.outputs.npm_stable_remote }}
-          - npm latest: ${{ steps.check-npm.outputs.npm_latest_local }} → ${{ steps.check-npm.outputs.npm_latest_remote }}"
-            else
-              BODY_LINES="- npm stable: ${{ steps.check-npm.outputs.npm_stable_local }} → ${{ steps.check-npm.outputs.npm_stable_remote }}
-          - npm latest: ${{ steps.check-npm.outputs.npm_latest_local }} → ${{ steps.check-npm.outputs.npm_latest_remote }}"
-            fi
-          fi
+          TITLE_PARTS="stable ${{ steps.check-native.outputs.stable_remote }}, latest ${{ steps.check-native.outputs.latest_remote }}"
+          BODY_LINES="- stable: ${{ steps.check-native.outputs.stable_local }} -> ${{ steps.check-native.outputs.stable_remote }}"
+          BODY_LINES="$BODY_LINES
+          - latest: ${{ steps.check-native.outputs.latest_local }} -> ${{ steps.check-native.outputs.latest_remote }}"
 
           echo "title=update $TITLE_PARTS" >> $GITHUB_OUTPUT
           echo "body<<EOF" >> $GITHUB_OUTPUT
@@ -123,7 +73,7 @@ jobs:
 
       - name: Create Pull Request
         id: create-pr
-        if: steps.check-native.outputs.needs_update == 'true' || steps.check-npm.outputs.needs_update == 'true'
+        if: steps.check-native.outputs.needs_update == 'true'
         uses: peter-evans/create-pull-request@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}

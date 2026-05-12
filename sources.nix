@@ -2,10 +2,8 @@
 #
 # To update:
 #   - Native binary: ./scripts/update-native.sh
-#   - npm package: ./scripts/update-npm.sh
-#   - Both: ./scripts/update-all.sh
 #
-# Channels (both native and npm):
+# Channels:
 #   - stable: Production-ready releases
 #   - latest: Most recent release (may be ahead of stable)
 
@@ -40,15 +38,4 @@
     };
   };
 
-  # npm package versions
-  npm = {
-    stable = {
-      version = "2.1.126";
-      sha256 = "186lzlphd1jnhg0z2xqq3hljrnxrrfcp2cnkhhgz8z7nsb23sxrb";
-    };
-    latest = {
-      version = "2.1.139";
-      sha256 = "1c2nzl24f5zskz4npczaph1m1sfjz75vfm211xw0mm321m82q7j1";
-    };
-  };
 }

@@ -6,10 +6,9 @@ Nix flake for [Claude Code](https://claude.ai/code).
 
 | Package | Description |
 |---------|-------------|
-| `native-latest` | Native binary, latest channel |
-| `native-stable` | Native binary, stable channel |
-| `npm-latest` | npm package, latest channel |
-| `npm-stable` | npm package, stable channel |
+| `latest` | Native binary, latest channel |
+| `stable` | Native binary, stable channel |
+| `default` | Alias for `latest` |
 
 Supported: `aarch64-darwin`, `x86_64-linux`, `aarch64-linux`
 
@@ -18,14 +17,11 @@ Supported: `aarch64-darwin`, `x86_64-linux`, `aarch64-linux`
 Pin to a specific version using git tags:
 
 ```nix
-# Pin to npm 2.1.2
-inputs.claude-code.url = "github:danneu/claude-code-nix?ref=npm-2.1.2";
-
-# Pin to native 2.0.75
-inputs.claude-code.url = "github:danneu/claude-code-nix?ref=native-2.0.75";
+# Pin to 2.1.139
+inputs.claude-code.url = "github:danneu/claude-code-nix?ref=v2.1.139";
 ```
 
-Tags follow the `latest` channel. Available tags: `npm-X.Y.Z`, `native-X.Y.Z`
+Tags follow the `latest` channel as `vX.Y.Z`.
 
 ## Quick Start
 
@@ -46,8 +42,8 @@ programs.claude-code.enable = true;
 ## Standalone
 
 ```bash
-nix build github:danneu/claude-code-nix#native-latest
-nix run github:danneu/claude-code-nix#npm-stable
+nix build github:danneu/claude-code-nix#latest
+nix run github:danneu/claude-code-nix#stable
 ```
 
 ## Options
@@ -55,7 +51,6 @@ nix run github:danneu/claude-code-nix#npm-stable
 ```nix
 programs.claude-code = {
   enable = true;
-  variant = "native";  # "native" | "npm"
   channel = "latest";  # "latest" | "stable"
 
   # ~/.claude/settings.json
@@ -88,10 +83,8 @@ programs.claude-code = {
 ## Overlay
 
 ```nix
-pkgs.claude-code          # native-latest
-pkgs.claude-code-stable   # native-stable
-pkgs.claude-code-npm      # npm-latest
-pkgs.claude-code-npm-stable
+pkgs.claude-code          # latest
+pkgs.claude-code-stable   # stable
 ```
 
 ## Development

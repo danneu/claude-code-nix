@@ -11,12 +11,8 @@
       supportedSystems = [ "aarch64-darwin" "x86_64-linux" "aarch64-linux" ];
 
       overlay = final: prev: {
-        # Native binary variants
         claude-code = final.callPackage ./native.nix { channel = "latest"; };
         claude-code-stable = final.callPackage ./native.nix { channel = "stable"; };
-        # npm variants
-        claude-code-npm = final.callPackage ./npm.nix { channel = "latest"; };
-        claude-code-npm-stable = final.callPackage ./npm.nix { channel = "stable"; };
       };
     in
     flake-utils.lib.eachSystem supportedSystems (system:
@@ -29,15 +25,9 @@
       in
       {
         packages = {
-          # Native binary packages
-          native-latest = pkgs.claude-code;
-          native-stable = pkgs.claude-code-stable;
-          # npm packages
-          npm-latest = pkgs.claude-code-npm;
-          npm-stable = pkgs.claude-code-npm-stable;
-          # Aliases for backwards compatibility
-          npm = pkgs.claude-code-npm;
-          # No default - forces explicit choice between native/npm
+          default = pkgs.claude-code;
+          latest = pkgs.claude-code;
+          stable = pkgs.claude-code-stable;
         };
 
         # Tests for smartmerge function

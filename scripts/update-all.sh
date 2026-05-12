@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Update all Claude Code packages (native binary and Node.js)
+# Update all Claude Code package channels
 #
 # Usage: ./scripts/update-all.sh [native-channel]
 #
@@ -13,21 +13,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "=========================================="
-echo "Updating Claude Code packages"
+echo "Updating Claude Code"
 echo "=========================================="
 echo ""
 
-# Update native binary
 "$SCRIPT_DIR/update-native.sh" "${1:-all}"
 
 echo ""
 echo "=========================================="
-echo ""
-
-# Update npm package
-"$SCRIPT_DIR/update-npm.sh"
-
-echo ""
-echo "=========================================="
-echo "All updates complete!"
+echo "Update complete!"
 echo "=========================================="

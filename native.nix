@@ -1,8 +1,6 @@
 # Claude Code Package (Official Native Binary)
 #
 # This package installs Claude Code's official native binary.
-# Unlike the npm-based installation, this is a self-contained binary
-# that doesn't require Node.js.
 #
 # Binary source: https://storage.googleapis.com/claude-code-dist-.../claude-code-releases
 

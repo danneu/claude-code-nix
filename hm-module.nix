@@ -1,8 +1,7 @@
 # Home Manager module for Claude Code
 #
 # Provides:
-# - Package installation with native/npm variant selection
-# - Channel selection for native variant (stable/latest)
+# - Package installation with stable/latest channel selection
 # - Declarative settings management (~/.claude/settings.json)
 # - MCP server configuration (~/.claude.json)
 # - Custom slash commands (~/.claude/commands/)
@@ -18,9 +17,7 @@ with lib;
 let
   cfg = config.programs.claude-code;
   package =
-    if cfg.variant == "npm" then
-      (if cfg.channel == "stable" then pkgs.claude-code-npm-stable else pkgs.claude-code-npm)
-    else if cfg.channel == "stable" then
+    if cfg.channel == "stable" then
       pkgs.claude-code-stable
     else
       pkgs.claude-code;
@@ -140,26 +137,13 @@ in
   options.programs.claude-code = {
     enable = mkEnableOption "Claude Code";
 
-    variant = mkOption {
-      type = types.enum [
-        "native"
-        "npm"
-      ];
-      default = "native";
-      description = ''
-        Which Claude Code variant to use:
-        - "native": Official native binary (recommended, faster startup)
-        - "npm": npm package (alternative for systems with issues on native)
-      '';
-    };
-
     channel = mkOption {
       type = types.enum [
         "stable"
         "latest"
       ];
       default = "latest";
-      description = "Release channel: 'stable' or 'latest' (applies to both native and npm variants)";
+      description = "Release channel: 'stable' or 'latest'";
     };
 
     settings = mkOption {
@@ -329,8 +313,6 @@ in
     # Base config: package and PATH setup
     {
       home.packages = [ package ];
-      # This is what native install wants.
-      # TODO: Not sure if it matters for the node variant?
       home.sessionPath = [ "$HOME/.local/bin" ];
       home.file.".local/bin/claude".source = "${package}/bin/claude";
     }
@@ -373,8 +355,8 @@ in
       '';
     })
 
-    # Set installMethod in ~/.claude.json based on variant
-    # Valid config values: "native", "global", "local"
+    # Set installMethod in ~/.claude.json.
+    # Valid config values: "native", "global", "local".
     {
       home.activation.claudeCodeInstallMethod = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
         CLAUDE_JSON="${config.home.homeDirectory}/.claude.json"
@@ -384,12 +366,10 @@ in
           echo '{}' > "$INIT_TEMP"
           $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$INIT_TEMP" "$CLAUDE_JSON"
         fi
-        # Set installMethod based on variant
-        INSTALL_METHOD="${if cfg.variant == "npm" then "global" else "native"}"
         INSTALL_TEMP=$(${pkgs.coreutils}/bin/mktemp)
         _cleanup_install() { ${pkgs.coreutils}/bin/rm -f "$INSTALL_TEMP" 2>/dev/null || true; }
         trap _cleanup_install EXIT
-        $DRY_RUN_CMD ${pkgs.jq}/bin/jq --arg method "$INSTALL_METHOD" '.installMethod = $method' "$CLAUDE_JSON" > "$INSTALL_TEMP"
+        $DRY_RUN_CMD ${pkgs.jq}/bin/jq '.installMethod = "native"' "$CLAUDE_JSON" > "$INSTALL_TEMP"
         $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$INSTALL_TEMP" "$CLAUDE_JSON"
         _cleanup_install
         trap - EXIT
