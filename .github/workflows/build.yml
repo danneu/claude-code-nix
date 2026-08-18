@@ -7,6 +7,18 @@ on:
     branches: [master]
 
 jobs:
+  check:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Run tests
+        run: nix flake check -L
+
   build:
     runs-on: macos-latest
     strategy:
