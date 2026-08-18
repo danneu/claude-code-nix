@@ -9,17 +9,18 @@ let
   smartMergeScript = import ../lib/smartmerge.nix;
   deepDiffScript = import ../lib/deepdiff.nix;
 
-  # The composed per-file expressions the module's activation steps run, not
-  # the private helpers underneath them.
-  mergeExpr = import ../lib/mergeexpr.nix;
+  # The composed per-file invocations the module's activation steps run, not
+  # the private helpers underneath them. These are full jq argv fragments:
+  # the program and the owned-path list arrive already shell-escaped.
+  mergeExpr = import ../lib/mergeexpr.nix { lib = pkgs.lib; };
 
-  # Run a composed merge the way activation does: `jq -s <expr> <nix> <file>`.
+  # Run a composed merge the way activation does: `jq -s <args> <nix> <file>`.
   runOwnedMerge =
     { nix, file, owned }:
     pkgs.runCommand "owned-merge-result" { buildInputs = [ pkgs.jq ]; } ''
       printf '%s' ${pkgs.lib.escapeShellArg nix} > nix.json
       printf '%s' ${pkgs.lib.escapeShellArg file} > file.json
-      jq -c -s '${mergeExpr.merge owned}' nix.json file.json > $out
+      jq -c -s ${mergeExpr.merge owned} nix.json file.json > $out
     '';
 
   runOwnedRemovals =
@@ -27,8 +28,35 @@ let
     pkgs.runCommand "owned-removals-result" { buildInputs = [ pkgs.jq ]; } ''
       printf '%s' ${pkgs.lib.escapeShellArg nix} > nix.json
       printf '%s' ${pkgs.lib.escapeShellArg file} > file.json
-      jq -c -s '${mergeExpr.removals owned}' nix.json file.json > $out
+      jq -c -s ${mergeExpr.removals owned} nix.json file.json > $out
     '';
+
+  # The rendered activation log line, label included.
+  runRemovalsReport =
+    { nix, file, owned }:
+    pkgs.runCommand "owned-removals-report" { buildInputs = [ pkgs.jq ]; } ''
+      printf '%s' ${pkgs.lib.escapeShellArg nix} > nix.json
+      printf '%s' ${pkgs.lib.escapeShellArg file} > file.json
+      jq -r -s --arg label settings.json ${mergeExpr.removalsReport owned} \
+        nix.json file.json > $out
+    '';
+
+  # nix string literals have no \u escape, so get a real ESC byte via JSON.
+  esc = builtins.fromJSON ''"\u001b"'';
+
+  mkReportTest =
+    name:
+    {
+      nix,
+      file,
+      owned,
+      expected,
+    }:
+    pkgs.testers.testEqualContents {
+      assertion = "removals report: ${name}";
+      expected = pkgs.writeText "expected" expected;
+      actual = runRemovalsReport { inherit nix file owned; };
+    };
 
   mkOwnedTest =
     name:
@@ -273,6 +301,26 @@ in
     owned = [ "env.B" ];
     expected = ''{"path":"env.B","old":"2"}
 '';
+  };
+
+  # An owned path containing a single quote must not break out of the
+  # single-quoted jq program in the generated activation script. The path is
+  # unreachable by design (dots and quotes are not addressable), but it must
+  # fail as "no such path", never as a shell parse error.
+  owned-quote-in-path-is-inert = mkOwnedTest "a quote in an owned path cannot break the shell" {
+    file = ''{"keep":1}'';
+    nix = ''{}'';
+    owned = [ "no'such;rm -rf /;path" ];
+    expected = ''{"keep":1}
+'';
+  };
+
+  # PO5: the line activation actually prints for an owned-path deletion.
+  removals-report-renders-log-line = mkReportTest "report names the label, path and old value" {
+    file = ''{"autoMode":{"allow":["x"]},"tui":1}'';
+    nix = ''{}'';
+    owned = [ "autoMode" ];
+    expected = "${esc}[31m[settings.json] Removing autoMode (owned by nix):${esc}[0m\n  Old: {\"allow\":[\"x\"]}\n";
   };
 
   # === deepdiff tests ===

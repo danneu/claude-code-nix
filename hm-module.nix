@@ -25,11 +25,11 @@ let
 
   # Import merge jq functions
   deepDiffScript = import ./lib/deepdiff.nix;
-  mergeExpr = import ./lib/mergeexpr.nix;
+  mergeExpr = import ./lib/mergeexpr.nix { inherit lib; };
 
   # ~/.claude/settings.json
-  jqMergeExprSettings = mergeExpr.merge cfg.settingsOwnedPaths;
-  jqRemovalsExprSettings = mergeExpr.removals cfg.settingsOwnedPaths;
+  jqMergeArgsSettings = mergeExpr.merge cfg.settingsOwnedPaths;
+  jqRemovalsReportSettings = mergeExpr.removalsReport cfg.settingsOwnedPaths;
 
   # ~/.claude.json: the typed mcpServers option and the free-form claudeJson
   # attrs fold into one nix document applied in a single pass, so the two can
@@ -42,8 +42,8 @@ let
     }
     // cfg.claudeJson;
 
-  jqMergeExprClaudeJson = mergeExpr.merge cfg.claudeJsonOwnedPaths;
-  jqRemovalsExprClaudeJson = mergeExpr.removals cfg.claudeJsonOwnedPaths;
+  jqMergeArgsClaudeJson = mergeExpr.merge cfg.claudeJsonOwnedPaths;
+  jqRemovalsReportClaudeJson = mergeExpr.removalsReport cfg.claudeJsonOwnedPaths;
 
   # Declaring an owned path is itself configuration: a file's sync must run
   # when nix claims paths in it, even if nix sets no keys there, or the
@@ -123,14 +123,12 @@ let
   # Emit a "Removing <path>" line for each owned path the merge will delete.
   # Ownership is the only way this module deletes anything, so activation says
   # so out loud and prints the old value alongside it.
-  # Usage: printRemovals "label" <removals jq expr> "$NIX_FILE" "$TARGET_FILE"
+  # Usage: printRemovals "label" <removals-report jq argv> "$NIX_FILE" "$TARGET_FILE"
   printRemovals =
-    label: removalsExpr: nixFile: targetFile:
+    label: reportArgs: nixFile: targetFile:
     ''
-      ${pkgs.jq}/bin/jq -r --arg label "${label}" '
-        ${removalsExpr}
-        | "\u001b[31m[\($label)] Removing \(.path) (owned by nix):\u001b[0m\n  Old: \(.old | @json)"
-      ' -s "${nixFile}" "${targetFile}" 2>/dev/null || true
+      ${pkgs.jq}/bin/jq -r -s --arg label ${lib.escapeShellArg label} ${reportArgs} \
+        "${nixFile}" "${targetFile}" 2>/dev/null || true
     '';
 
   # Build MCP server config, only including non-empty optional fields
@@ -373,9 +371,9 @@ in
                     # Print any keys that will be overridden
                                       print_overrides "settings.json" "$SETTINGS_TEMP_DEFAULTS" "$SETTINGS_PATH"''}
                   ${optionalString (cfg.printOverrides && cfg.settingsOwnedPaths != [ ]) (
-                    printRemovals "settings.json" jqRemovalsExprSettings "$SETTINGS_TEMP_DEFAULTS" "$SETTINGS_PATH"
+                    printRemovals "settings.json" jqRemovalsReportSettings "$SETTINGS_TEMP_DEFAULTS" "$SETTINGS_PATH"
                   )}
-                  $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s '${jqMergeExprSettings}' "$SETTINGS_TEMP_DEFAULTS" "$SETTINGS_PATH" > "$SETTINGS_TEMP"
+                  $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s ${jqMergeArgsSettings} "$SETTINGS_TEMP_DEFAULTS" "$SETTINGS_PATH" > "$SETTINGS_TEMP"
                   $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$SETTINGS_TEMP" "$SETTINGS_PATH"
                   _cleanup_settings
                   trap - EXIT
@@ -425,9 +423,9 @@ in
                 ${optionalString cfg.printOverrides ''
                   print_overrides_deep ".claude.json" "$CLAUDE_JSON_TEMP_NIX" "$CLAUDE_JSON"''}
                 ${optionalString (cfg.printOverrides && cfg.claudeJsonOwnedPaths != [ ]) (
-                  printRemovals ".claude.json" jqRemovalsExprClaudeJson "$CLAUDE_JSON_TEMP_NIX" "$CLAUDE_JSON"
+                  printRemovals ".claude.json" jqRemovalsReportClaudeJson "$CLAUDE_JSON_TEMP_NIX" "$CLAUDE_JSON"
                 )}
-                $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s '${jqMergeExprClaudeJson}' "$CLAUDE_JSON_TEMP_NIX" "$CLAUDE_JSON" > "$CLAUDE_JSON_TEMP"
+                $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s ${jqMergeArgsClaudeJson} "$CLAUDE_JSON_TEMP_NIX" "$CLAUDE_JSON" > "$CLAUDE_JSON_TEMP"
                 $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$CLAUDE_JSON_TEMP" "$CLAUDE_JSON"
                 _cleanup_claude_json
                 trap - EXIT
