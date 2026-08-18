@@ -1,4 +1,4 @@
-# Tests for the smartmerge and strictmerge jq functions
+# Tests for the composed merge expressions and the deepdiff jq function
 #
 # Run with: nix flake check
 # Verbose:  nix flake check -L
@@ -7,19 +7,61 @@
 
 let
   smartMergeScript = import ../lib/smartmerge.nix;
-  strictMergeScript = import ../lib/strictmerge.nix;
   deepDiffScript = import ../lib/deepdiff.nix;
+
+  # The composed per-file expressions the module's activation steps run, not
+  # the private helpers underneath them.
+  mergeExpr = import ../lib/mergeexpr.nix;
+
+  # Run a composed merge the way activation does: `jq -s <expr> <nix> <file>`.
+  runOwnedMerge =
+    { nix, file, owned }:
+    pkgs.runCommand "owned-merge-result" { buildInputs = [ pkgs.jq ]; } ''
+      printf '%s' ${pkgs.lib.escapeShellArg nix} > nix.json
+      printf '%s' ${pkgs.lib.escapeShellArg file} > file.json
+      jq -c -s '${mergeExpr.merge owned}' nix.json file.json > $out
+    '';
+
+  runOwnedRemovals =
+    { nix, file, owned }:
+    pkgs.runCommand "owned-removals-result" { buildInputs = [ pkgs.jq ]; } ''
+      printf '%s' ${pkgs.lib.escapeShellArg nix} > nix.json
+      printf '%s' ${pkgs.lib.escapeShellArg file} > file.json
+      jq -c -s '${mergeExpr.removals owned}' nix.json file.json > $out
+    '';
+
+  mkOwnedTest =
+    name:
+    {
+      nix,
+      file,
+      owned,
+      expected,
+    }:
+    pkgs.testers.testEqualContents {
+      assertion = "ownedmerge: ${name}";
+      expected = pkgs.writeText "expected" expected;
+      actual = runOwnedMerge { inherit nix file owned; };
+    };
+
+  mkRemovalsTest =
+    name:
+    {
+      nix,
+      file,
+      owned,
+      expected,
+    }:
+    pkgs.testers.testEqualContents {
+      assertion = "ownedremovals: ${name}";
+      expected = pkgs.writeText "expected" expected;
+      actual = runOwnedRemovals { inherit nix file owned; };
+    };
 
   # Run smartmerge and return result as a file (compact output for consistent comparison)
   runSmartMerge = base: over:
     pkgs.runCommand "merge-result" { buildInputs = [ pkgs.jq ]; } ''
       jq -cn '${smartMergeScript} smartmerge(${base}; ${over})' > $out
-    '';
-
-  # Run strictmerge and return result as a file
-  runStrictMerge = base: over:
-    pkgs.runCommand "merge-result" { buildInputs = [ pkgs.jq ]; } ''
-      jq -cn '${strictMergeScript} strictmerge(${base}; ${over})' > $out
     '';
 
   # Create a test using testers.testEqualContents (shows diff on failure)
@@ -28,13 +70,6 @@ let
       assertion = "smartmerge: ${name}";
       expected = pkgs.writeText "expected" expected;
       actual = runSmartMerge base over;
-    };
-
-  mkStrictTest = name: { base, over, expected }:
-    pkgs.testers.testEqualContents {
-      assertion = "strictmerge: ${name}";
-      expected = pkgs.writeText "expected" expected;
-      actual = runStrictMerge base over;
     };
 
   # Run deepdiff($existing; $nix; "") with inline JSON literals (like runSmartMerge)
@@ -111,39 +146,132 @@ in
 '';
   };
 
-  # === strictmerge tests ===
-  strictmerge-removes-base-only = mkStrictTest "base-only keys removed" {
-    base = ''{"a":1,"b":2,"c":3}'';
-    over = ''{"a":10}'';
-    expected = ''{"a":10}
+  # === owned-path tests (composed merge expression) ===
+
+  # PO1: a realistic settings.json -- app-managed keys nix never sets must
+  # survive alongside an owned autoMode subtree that nix replaces wholesale.
+  owned-app-keys-survive = mkOwnedTest "app-managed keys survive an owned autoMode" {
+    file = ''{"autoMode":{"allow":["$defaults","StaleRule"],"soft_deny":["$defaults"]},"autoCompactEnabled":true,"env":{"CLAUDE_CODE_NO_FLICKER":"1"},"permissions":{"defaultMode":"auto"},"tui":{"diffMode":"inline"},"voiceEnabled":false}'';
+    nix = ''{"autoMode":{"allow":["$defaults"],"soft_deny":["$defaults"]},"permissions":{"defaultMode":"auto"}}'';
+    owned = [ "autoMode" ];
+    expected = ''{"autoCompactEnabled":true,"autoMode":{"allow":["$defaults"],"soft_deny":["$defaults"]},"env":{"CLAUDE_CODE_NO_FLICKER":"1"},"permissions":{"defaultMode":"auto"},"tui":{"diffMode":"inline"},"voiceEnabled":false}
 '';
   };
 
-  strictmerge-adds-over-only = mkStrictTest "over-only keys added" {
-    base = ''{"a":1}'';
-    over = ''{"a":10,"b":2}'';
-    expected = ''{"a":10,"b":2}
+  # PO1: file-only keys nested below an unowned path survive too.
+  owned-nested-file-keys-survive = mkOwnedTest "file-only keys under an unowned path survive" {
+    file = ''{"env":{"A":"1","B":"2"},"x":1}'';
+    nix = ''{"env":{"A":"9"}}'';
+    owned = [ ];
+    expected = ''{"env":{"A":"9","B":"2"},"x":1}
 '';
   };
 
-  strictmerge-deep-removes = mkStrictTest "nested base-only keys removed" {
-    base = ''{"a":{"x":1,"y":2}}'';
-    over = ''{"a":{"x":10}}'';
-    expected = ''{"a":{"x":10}}
+  # PO2: at an owned path nix replaces the subtree wholesale -- a stale array
+  # entry and a stale sibling key both go, which plain deep merge would keep.
+  owned-replaces-wholesale = mkOwnedTest "owned path replaces subtree wholesale" {
+    file = ''{"autoMode":{"allow":["$defaults","StaleRule"],"soft_deny":["$defaults"],"legacyKey":true}}'';
+    nix = ''{"autoMode":{"allow":["$defaults"]}}'';
+    owned = [ "autoMode" ];
+    expected = ''{"autoMode":{"allow":["$defaults"]}}
 '';
   };
 
-  strictmerge-empty-clears = mkStrictTest "empty over clears all" {
-    base = ''{"a":1,"b":2}'';
-    over = ''{}'';
-    expected = ''{}
+  # PO2: nix defines nothing at the owned path and the nix document is empty.
+  owned-deleted-when-nix-doc-empty = mkOwnedTest "owned path deleted when nix doc is entirely empty" {
+    file = ''{"autoMode":{"allow":["x"]},"tui":{"diffMode":"inline"}}'';
+    nix = ''{}'';
+    owned = [ "autoMode" ];
+    expected = ''{"tui":{"diffMode":"inline"}}
 '';
   };
 
-  strictmerge-scalar-wins = mkStrictTest "override wins for scalars" {
-    base = ''{"x":1}'';
-    over = ''{"x":2}'';
-    expected = ''{"x":2}
+  # An empty nix document sets nothing; it must never be read as "erase the
+  # file". smartmerge's empty-object-replaces rule applies at a key, not at the
+  # root, and owned-path gating is what makes an empty document reachable here.
+  owned-empty-nix-doc-is-not-erasure = mkOwnedTest "empty nix doc with no owned paths leaves the file untouched" {
+    file = ''{"projects":{"/home/x":{"allowedTools":[]}},"tui":1}'';
+    nix = ''{}'';
+    owned = [ ];
+    expected = ''{"projects":{"/home/x":{"allowedTools":[]}},"tui":1}
+'';
+  };
+
+  # PO2: an explicit null counts as defining nothing.
+  owned-deleted-on-explicit-null = mkOwnedTest "explicit null at owned path deletes it" {
+    file = ''{"autoMode":{"allow":["x"]},"tui":1}'';
+    nix = ''{"autoMode":null}'';
+    owned = [ "autoMode" ];
+    expected = ''{"tui":1}
+'';
+  };
+
+  # PO2: owned path is created when the file lacks it.
+  owned-created-when-absent = mkOwnedTest "owned path created when the file lacks it" {
+    file = ''{"tui":1}'';
+    nix = ''{"autoMode":{"allow":["$defaults"]}}'';
+    owned = [ "autoMode" ];
+    expected = ''{"autoMode":{"allow":["$defaults"]},"tui":1}
+'';
+  };
+
+  # PO2: a dotted path owns only that leaf, not its parent.
+  owned-nested-dotted-path = mkOwnedTest "dotted owned path deletes the leaf, spares its siblings" {
+    file = ''{"env":{"A":"1","B":"2"},"x":1}'';
+    nix = ''{"env":{"A":"9"}}'';
+    owned = [ "env.B" ];
+    expected = ''{"env":{"A":"9"},"x":1}
+'';
+  };
+
+  owned-nested-dotted-replace = mkOwnedTest "dotted owned path replaces the leaf wholesale" {
+    file = ''{"env":{"A":{"keep":1,"stale":2},"B":"2"}}'';
+    nix = ''{"env":{"A":{"keep":9}}}'';
+    owned = [ "env.A" ];
+    expected = ''{"env":{"A":{"keep":9},"B":"2"}}
+'';
+  };
+
+  # PO4: owning mcpServers must not touch the rest of ~/.claude.json.
+  owned-claudejson-preserves-app-state = mkOwnedTest ".claude.json app state survives an owned mcpServers" {
+    file = ''{"installMethod":"native","mcpServers":{"stale":{"type":"stdio"}},"oauthAccount":{"emailAddress":"a@b.c"},"projects":{"/home/x":{"allowedTools":[]}}}'';
+    nix = ''{"mcpServers":{"playwright":{"type":"stdio","command":"npx","args":["-y"]}}}'';
+    owned = [ "mcpServers" ];
+    expected = ''{"installMethod":"native","mcpServers":{"playwright":{"type":"stdio","command":"npx","args":["-y"]}},"oauthAccount":{"emailAddress":"a@b.c"},"projects":{"/home/x":{"allowedTools":[]}}}
+'';
+  };
+
+  # PO4: with no owned paths declared, nothing can be removed at all.
+  owned-empty-list-removes-nothing = mkOwnedTest "no owned paths removes nothing" {
+    file = ''{"mcpServers":{"stale":{"type":"stdio"}},"projects":{"/home/x":{"allowedTools":[]}}}'';
+    nix = ''{"mcpServers":{"playwright":{"type":"stdio"}}}'';
+    owned = [ ];
+    expected = ''{"mcpServers":{"playwright":{"type":"stdio"},"stale":{"type":"stdio"}},"projects":{"/home/x":{"allowedTools":[]}}}
+'';
+  };
+
+  # === owned-path removal reporting (PO5) ===
+
+  removals-reports-path-and-old-value = mkRemovalsTest "removal entry carries path and old value" {
+    file = ''{"autoMode":{"allow":["x"]},"tui":1}'';
+    nix = ''{}'';
+    owned = [ "autoMode" ];
+    expected = ''{"path":"autoMode","old":{"allow":["x"]}}
+'';
+  };
+
+  removals-silent-when-nothing-removed = mkRemovalsTest "no removal entry when nix defines the owned path" {
+    file = ''{"autoMode":{"allow":["x"]}}'';
+    nix = ''{"autoMode":{"allow":["y"]}}'';
+    owned = [ "autoMode" ];
+    expected = '''';
+  };
+
+  removals-reports-nested-path = mkRemovalsTest "removal entry for a dotted path" {
+    file = ''{"env":{"A":"1","B":"2"}}'';
+    nix = ''{"env":{"A":"9"}}'';
+    owned = [ "env.B" ];
+    expected = ''{"path":"env.B","old":"2"}
 '';
   };
 
@@ -180,3 +308,4 @@ in
 '';
   };
 }
+// import ./module.nix { inherit pkgs; }

@@ -4,6 +4,7 @@
 # - Package installation with stable/latest channel selection
 # - Declarative settings management (~/.claude/settings.json)
 # - MCP server configuration (~/.claude.json)
+# - Per-path nix ownership (settingsOwnedPaths / claudeJsonOwnedPaths)
 # - Custom slash commands (~/.claude/commands/)
 {
   config,
@@ -23,26 +24,32 @@ let
       pkgs.claude-code;
 
   # Import merge jq functions
-  smartMergeScript = import ./lib/smartmerge.nix;
-  strictMergeScript = import ./lib/strictmerge.nix;
   deepDiffScript = import ./lib/deepdiff.nix;
+  mergeExpr = import ./lib/mergeexpr.nix;
 
-  # Generate jq expression for a given merge strategy
-  jqExprForStrategy = strategy:
-    if strategy == "nix-only" then
-      "${strictMergeScript} strictmerge(.[1]; .[0])" # nix is source of truth
-    else if strategy == "nix-wins" then
-      "${smartMergeScript} smartmerge(.[1]; .[0])" # file=base, nix=over (nix wins)
-    else
-      "${smartMergeScript} smartmerge(.[0]; .[1])"; # nix=base, file=over (file wins)
+  # ~/.claude/settings.json
+  jqMergeExprSettings = mergeExpr.merge cfg.settingsOwnedPaths;
+  jqRemovalsExprSettings = mergeExpr.removals cfg.settingsOwnedPaths;
 
-  jqMergeExprSettings = jqExprForStrategy cfg.settingsMergeStrategy;
-  jqMergeExprMcp = jqExprForStrategy cfg.mcpServersMergeStrategy;
-  jqMergeExprClaudeJson = jqExprForStrategy cfg.claudeJsonMergeStrategy;
+  # ~/.claude.json: the typed mcpServers option and the free-form claudeJson
+  # attrs fold into one nix document applied in a single pass, so the two can
+  # no longer race over the same file and `claudeJsonOwnedPaths = [ "mcpServers" ]`
+  # means "nix owns the server set". Defining servers both ways is an assertion
+  # below, not a silent precedence rule.
+  claudeJsonDoc =
+    optionalAttrs (cfg.mcpServers != { }) {
+      mcpServers = mapAttrs mkMcpServer cfg.mcpServers;
+    }
+    // cfg.claudeJson;
 
-  hasSettings = cfg.settings != { };
-  hasMcpServers = cfg.mcpServers != { };
-  hasClaudeJson = cfg.claudeJson != { };
+  jqMergeExprClaudeJson = mergeExpr.merge cfg.claudeJsonOwnedPaths;
+  jqRemovalsExprClaudeJson = mergeExpr.removals cfg.claudeJsonOwnedPaths;
+
+  # Declaring an owned path is itself configuration: a file's sync must run
+  # when nix claims paths in it, even if nix sets no keys there, or the
+  # ownership deletion would never happen.
+  hasSettings = cfg.settings != { } || cfg.settingsOwnedPaths != [ ];
+  hasClaudeJson = claudeJsonDoc != { } || cfg.claudeJsonOwnedPaths != [ ];
 
   # Recursively read a directory, returning { "relative/path.md" = "/abs/path.md"; ... }
   readDirRec =
@@ -112,6 +119,19 @@ let
       ' -s "$new_file" "$existing_file" 2>/dev/null || true
     }
   '';
+
+  # Emit a "Removing <path>" line for each owned path the merge will delete.
+  # Ownership is the only way this module deletes anything, so activation says
+  # so out loud and prints the old value alongside it.
+  # Usage: printRemovals "label" <removals jq expr> "$NIX_FILE" "$TARGET_FILE"
+  printRemovals =
+    label: removalsExpr: nixFile: targetFile:
+    ''
+      ${pkgs.jq}/bin/jq -r --arg label "${label}" '
+        ${removalsExpr}
+        | "\u001b[31m[\($label)] Removing \(.path) (owned by nix):\u001b[0m\n  Old: \(.old | @json)"
+      ' -s "${nixFile}" "${targetFile}" 2>/dev/null || true
+    '';
 
   # Build MCP server config, only including non-empty optional fields
   mkMcpServer =
@@ -224,34 +244,23 @@ in
       '';
     };
 
-    settingsMergeStrategy = mkOption {
-      type = types.enum [
-        "file-wins"
-        "nix-wins"
-        "nix-only"
-      ];
-      default = "nix-wins";
+    settingsOwnedPaths = mkOption {
+      type = types.listOf types.str;
+      default = [ ];
       description = ''
-        Merge strategy for ~/.claude/settings.json:
-        - "file-wins": existing file values take precedence
-        - "nix-wins": nix config values take precedence (default)
-        - "nix-only": nix is source of truth, removes keys not in nix config
-      '';
-    };
+        Dot-separated key paths in ~/.claude/settings.json that nix owns
+        outright.
 
-    mcpServersMergeStrategy = mkOption {
-      type = types.enum [
-        "file-wins"
-        "nix-wins"
-        "nix-only"
-      ];
-      default = "nix-wins";
-      description = ''
-        Merge strategy for mcpServers in ~/.claude.json:
-        - "file-wins": existing file values take precedence
-        - "nix-wins": nix config values take precedence (default)
-        - "nix-only": nix is source of truth, removes servers not in nix config
+        Everything outside these paths is deep-merged with nix winning, so keys
+        the app writes and nix does not set survive. At an owned path, nix's
+        value replaces the file's subtree wholesale, and if nix defines nothing
+        there the path is removed -- which is how you express "nix owns this
+        subtree; absent means delete".
+
+        Ownership is destructive by design; consider backupBeforeMerge.
+        Keys containing literal dots cannot be addressed.
       '';
+      example = literalExpression ''[ "autoMode" "env.MAX_THINKING_TOKENS" ]'';
     };
 
     claudeJson = mkOption {
@@ -267,19 +276,20 @@ in
       '';
     };
 
-    claudeJsonMergeStrategy = mkOption {
-      type = types.enum [
-        "file-wins"
-        "nix-wins"
-        "nix-only"
-      ];
-      default = "nix-wins";
+    claudeJsonOwnedPaths = mkOption {
+      type = types.listOf types.str;
+      default = [ ];
       description = ''
-        Merge strategy for extra keys in ~/.claude.json:
-        - "file-wins": existing file values take precedence
-        - "nix-wins": nix config values take precedence (default)
-        - "nix-only": nix is source of truth, removes keys not in nix config
+        Dot-separated key paths in ~/.claude.json that nix owns outright.
+
+        Same semantics as settingsOwnedPaths. Note that ~/.claude.json holds
+        app state such as `projects` and `oauthAccount`; only paths listed here
+        are ever removed, so leaving this empty cannot delete anything.
+
+        `[ "mcpServers" ]` means nix owns the server set: servers added by
+        `claude mcp add` that nix does not declare are removed on activation.
       '';
+      example = literalExpression ''[ "mcpServers" ]'';
     };
 
     printOverrides = mkOption {
@@ -312,6 +322,21 @@ in
 
     # Base config: package and PATH setup
     {
+      # mcpServers and claudeJson.mcpServers now fold into one document, so a
+      # config that sets both is ambiguous about which wins. Fail rather than
+      # silently discarding one of them.
+      assertions = [
+        {
+          assertion = !(cfg.mcpServers != { } && cfg.claudeJson ? mcpServers);
+          message = ''
+            programs.claude-code: MCP servers are defined twice -- both in the
+            `mcpServers` option and as a `claudeJson.mcpServers` key. They merge
+            into the same ~/.claude.json document, so one would silently win.
+            Define the servers in exactly one of the two.
+          '';
+        }
+      ];
+
       home.packages = [ package ];
       home.sessionPath = [ "$HOME/.local/bin" ];
       home.file.".local/bin/claude".source = "${package}/bin/claude";
@@ -347,6 +372,9 @@ in
                   ${optionalString cfg.printOverrides ''
                     # Print any keys that will be overridden
                                       print_overrides "settings.json" "$SETTINGS_TEMP_DEFAULTS" "$SETTINGS_PATH"''}
+                  ${optionalString (cfg.printOverrides && cfg.settingsOwnedPaths != [ ]) (
+                    printRemovals "settings.json" jqRemovalsExprSettings "$SETTINGS_TEMP_DEFAULTS" "$SETTINGS_PATH"
+                  )}
                   $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s '${jqMergeExprSettings}' "$SETTINGS_TEMP_DEFAULTS" "$SETTINGS_PATH" > "$SETTINGS_TEMP"
                   $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$SETTINGS_TEMP" "$SETTINGS_PATH"
                   _cleanup_settings
@@ -376,40 +404,11 @@ in
       '';
     }
 
-    # MCP servers config (only when mcpServers defined)
-    (mkIf hasMcpServers {
-      home.activation.claudeCodeMcpServers = lib.hm.dag.entryAfter [ "claudeCodeInstallMethod" ] ''
-                ${optionalString cfg.backupBeforeMerge backupScript}
-                ${optionalString cfg.printOverrides printOverridesScript}
-                MCP_PATH="${config.home.homeDirectory}/.claude.json"
-                ${optionalString cfg.backupBeforeMerge "backup_file \"$MCP_PATH\""}
-                MCP_TEMP=$(${pkgs.coreutils}/bin/mktemp)
-                MCP_TEMP_NIX="$MCP_TEMP.nix"
-                _cleanup_mcp() { ${pkgs.coreutils}/bin/rm -f "$MCP_TEMP" "$MCP_TEMP_NIX" 2>/dev/null || true; }
-                trap _cleanup_mcp EXIT
-                cat > "$MCP_TEMP_NIX" <<'NIX_EOF'
-        ${builtins.toJSON {
-          mcpServers = mapAttrs mkMcpServer cfg.mcpServers;
-        }}
-        NIX_EOF
-                # Create empty file if it doesn't exist (respecting dry-run)
-                if [ ! -f "$MCP_PATH" ]; then
-                  MCP_INIT_TEMP=$(${pkgs.coreutils}/bin/mktemp)
-                  echo '{}' > "$MCP_INIT_TEMP"
-                  $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$MCP_INIT_TEMP" "$MCP_PATH"
-                fi
-                ${optionalString cfg.printOverrides ''
-                  # Print any MCP servers that will be overridden
-                                  print_overrides "mcpServers" "$MCP_TEMP_NIX" "$MCP_PATH" ".mcpServers"''}
-                # Deep merge using configured strategy
-                $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s '${jqMergeExprMcp}' "$MCP_TEMP_NIX" "$MCP_PATH" > "$MCP_TEMP"
-                $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$MCP_TEMP" "$MCP_PATH"
-                _cleanup_mcp
-                trap - EXIT
-      '';
-    })
-
-    # Extra ~/.claude.json keys (only when claudeJson defined)
+    # ~/.claude.json sync: mcpServers and claudeJson in a single pass.
+    #
+    # These were two activation steps merging into the same file with no
+    # ordering between them, so overlapping keys resolved by incidental DAG
+    # order. One step, one nix document, one merge.
     (mkIf hasClaudeJson {
       home.activation.claudeCodeClaudeJsonSync = lib.hm.dag.entryAfter [ "claudeCodeInstallMethod" ] ''
                 ${optionalString cfg.backupBeforeMerge backupScript}
@@ -421,10 +420,13 @@ in
                 _cleanup_claude_json() { ${pkgs.coreutils}/bin/rm -f "$CLAUDE_JSON_TEMP" "$CLAUDE_JSON_TEMP_NIX" 2>/dev/null || true; }
                 trap _cleanup_claude_json EXIT
                 cat > "$CLAUDE_JSON_TEMP_NIX" <<'CLAUDE_JSON_NIX_EOF'
-      ${builtins.toJSON cfg.claudeJson}
+      ${builtins.toJSON claudeJsonDoc}
       CLAUDE_JSON_NIX_EOF
                 ${optionalString cfg.printOverrides ''
                   print_overrides_deep ".claude.json" "$CLAUDE_JSON_TEMP_NIX" "$CLAUDE_JSON"''}
+                ${optionalString (cfg.printOverrides && cfg.claudeJsonOwnedPaths != [ ]) (
+                  printRemovals ".claude.json" jqRemovalsExprClaudeJson "$CLAUDE_JSON_TEMP_NIX" "$CLAUDE_JSON"
+                )}
                 $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s '${jqMergeExprClaudeJson}' "$CLAUDE_JSON_TEMP_NIX" "$CLAUDE_JSON" > "$CLAUDE_JSON_TEMP"
                 $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv "$CLAUDE_JSON_TEMP" "$CLAUDE_JSON"
                 _cleanup_claude_json
