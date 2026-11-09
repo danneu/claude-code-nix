@@ -24,16 +24,16 @@
   };
 
   latest = {
-    version = "2.1.319";
+    version = "2.1.321";
     platforms = {
       "aarch64-darwin" = {
-        sha256 = "1f53587e92dee8e089fa349188a4cda64fa34ace6e7b0ca2ee278ddaa3cc2ebd";
+        sha256 = "abc9feeeca8091d51b623291e044cf0528c2f6b74e0c1d6ef671d52c73f7cd3c";
       };
       "x86_64-linux" = {
-        sha256 = "dabafec82ca1319fa43d8be36a10fc61b1d11821cb98ad5df04ad95e199b8eed";
+        sha256 = "426c33815ca6645a772f722fbff10dbf2cbdb124a8aeab733c1365dbf8bbf61f";
       };
       "aarch64-linux" = {
-        sha256 = "a7e687fd1cb054d651c7588223de3786c99d4c682365e3c3ae1e59ce7f3a591f";
+        sha256 = "6bea0633074627ba79328e00115ed0588c3acf906a8463612b25db696dbfd3f0";
       };
     };
   };
